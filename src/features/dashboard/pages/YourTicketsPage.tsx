@@ -1,10 +1,5 @@
-import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore'
-import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import toast from 'react-hot-toast'
-import { useAuthState } from '@/hooks/useAuth'
-import { COLLECTIONS } from '@/lib/constants'
-import { db } from '@/lib/firebase'
+import { useUserTicketsList } from '@/hooks/useUserTicketsList'
 
 function fmtDate(ms: number) {
   if (!ms) return '—'
@@ -31,59 +26,10 @@ function statusLabel(s: string) {
   return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase()
 }
 
-type Row = {
-  id: string
-  createdAtMs: number
-  priority: string
-  department: string
-  subject: string
-  status: string
-}
+const TICKETS_LOAD_ERROR = 'Could not load tickets.'
 
 export function YourTicketsPage() {
-  const { firebaseUid } = useAuthState()
-  const [rows, setRows] = useState<Row[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    if (!firebaseUid) {
-      setLoading(false)
-      return
-    }
-    const q = query(
-      collection(db, COLLECTIONS.tickets),
-      where('userId', '==', firebaseUid),
-      orderBy('createdAt', 'desc'),
-    )
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const next: Row[] = []
-        snap.forEach((doc) => {
-          const d = doc.data()
-          const ts = d.createdAt
-          const createdAtMs =
-            ts && typeof ts.toMillis === 'function' ? ts.toMillis() : Number(d.createdAt ?? 0)
-          next.push({
-            id: doc.id,
-            createdAtMs,
-            priority: String(d.priority ?? ''),
-            department: String(d.department ?? ''),
-            subject: String(d.title ?? ''),
-            status: String(d.status ?? ''),
-          })
-        })
-        setRows(next)
-        setLoading(false)
-      },
-      () => {
-        setLoading(false)
-        toast.error('Could not load tickets')
-        setRows([])
-      },
-    )
-    return () => unsub()
-  }, [firebaseUid])
+  const { rows, loading } = useUserTicketsList(TICKETS_LOAD_ERROR)
 
   return (
     <main>

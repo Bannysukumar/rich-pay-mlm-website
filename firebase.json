@@ -19,6 +19,50 @@
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
+        "source": "/api/call/registerWithProfile",
+        "function": { "functionName": "registerWithProfile", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/updateMemberProfile",
+        "function": { "functionName": "updateMemberProfile", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/changeTransactionPassword",
+        "function": { "functionName": "changeTransactionPassword", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/resolveUsername",
+        "function": { "functionName": "resolveUsername", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/activatePackage",
+        "function": { "functionName": "activatePackage", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/createWithdrawal",
+        "function": { "functionName": "createWithdrawal", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/walletConvert",
+        "function": { "functionName": "walletConvert", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/convertIncomeToActivation",
+        "function": { "functionName": "convertIncomeToActivation", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/internalTransfer",
+        "function": { "functionName": "internalTransfer", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/listAllDownlines",
+        "function": { "functionName": "listAllDownlines", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/listDirectReferrals",
+        "function": { "functionName": "listDirectReferrals", "region": "us-central1" }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

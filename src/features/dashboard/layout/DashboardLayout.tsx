@@ -26,7 +26,11 @@ export function DashboardLayout() {
   }, [])
 
   return (
-    <div id="ki-dashboard-root" className={`ltr ${darkMode ? 'dark' : ''}`}>
+    <div
+      id="ki-dashboard-root"
+      className={`ltr ${darkMode ? 'dark' : ''}`}
+      data-bs-theme={darkMode ? 'dark' : 'light'}
+    >
       <div className="ki-app-wrapper">
         {/* Desktop sidebar */}
         <aside className="ki-sidebar ki-sidebar--desktop flex-column">

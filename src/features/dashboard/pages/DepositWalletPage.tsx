@@ -1,9 +1,5 @@
-import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore'
-import { useEffect, useState } from 'react'
-import toast from 'react-hot-toast'
 import { useAuthState } from '@/hooks/useAuth'
-import { COLLECTIONS } from '@/lib/constants'
-import { db } from '@/lib/firebase'
+import { useWalletTransactionHistory } from '@/hooks/useWalletTransactionHistory'
 
 /** Matches template: 04/05/2026 05:44 AM */
 function fmtDateTime(ms: number) {
@@ -41,67 +37,13 @@ function dbCell(debit: number) {
   return debit > 0 ? fmt4(debit) : '-'
 }
 
-type Row = {
-  id: string
-  createdAtMs: number
-  description: string
-  details: string
-  credit: number
-  debit: number
-  balanceAfter: number
-}
+const DEPOSIT_HISTORY_ERROR = 'Could not load deposit wallet history.'
 
 export function DepositWalletPage() {
-  const { firebaseUid, profile } = useAuthState()
-  const [rows, setRows] = useState<Row[]>([])
-  const [loading, setLoading] = useState(true)
+  const { profile } = useAuthState()
+  const { rows, loading } = useWalletTransactionHistory('deposit', DEPOSIT_HISTORY_ERROR)
 
   const balance = profile?.wallets.deposit ?? 0
-
-  useEffect(() => {
-    if (!firebaseUid) {
-      setLoading(false)
-      return
-    }
-    const q = query(
-      collection(db, COLLECTIONS.walletTransactions),
-      where('userId', '==', firebaseUid),
-      where('wallet', '==', 'deposit'),
-      orderBy('createdAt', 'asc'),
-    )
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const next: Row[] = []
-        snap.forEach((doc) => {
-          const d = doc.data()
-          const ts = d.createdAt
-          const createdAtMs =
-            ts && typeof ts.toMillis === 'function' ? ts.toMillis() : Number(d.createdAt ?? 0)
-          const credit = Number(d.credit ?? d.cr ?? 0)
-          const debit = Number(d.debit ?? d.db ?? 0)
-          const balanceAfter = Number(d.balanceAfter ?? d.bal ?? d.balance ?? 0)
-          next.push({
-            id: doc.id,
-            createdAtMs,
-            description: String(d.description ?? d.type ?? '—'),
-            details: String(d.details ?? d.detail ?? d.note ?? ''),
-            credit,
-            debit,
-            balanceAfter,
-          })
-        })
-        setRows(next)
-        setLoading(false)
-      },
-      () => {
-        setLoading(false)
-        toast.error('Could not load deposit wallet history')
-        setRows([])
-      },
-    )
-    return () => unsub()
-  }, [firebaseUid])
 
   return (
     <main>

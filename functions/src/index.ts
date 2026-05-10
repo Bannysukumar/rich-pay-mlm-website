@@ -9,11 +9,22 @@ admin.initializeApp()
 const db = admin.firestore()
 
 /**
- * Gen-2 callables sit behind Cloud Run. Without `invoker: 'public'`, preflight can 403 and the
- * browser reports a CORS error (no Access-Control-Allow-Origin). `cors: true` keeps localhost
- * and hosting origins working for `httpsCallable`.
+ * Gen-2 callables sit behind Cloud Run. `invoker: 'public'` avoids 403 on OPTIONS preflight.
+ * Explicit origins help when the web app calls `*.cloudfunctions.net` directly (e.g. before
+ * Hosting `/api/call/*` rewrites). Production should prefer same-origin `/api/call/:name` (see
+ * `httpsCallableHelper` + `firebase.json`).
  */
-const callableRuntimeOpts = { cors: true as const, invoker: 'public' as const }
+const callableRuntimeOpts = {
+  cors: [
+    'https://richpay.live',
+    'https://www.richpay.live',
+    'https://richpay-live-fe3f1.web.app',
+    'https://richpay-live-fe3f1.firebaseapp.com',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+  ],
+  invoker: 'public' as const,
+}
 
 const USERNAME_START = 4448550
 const COL_USERS = 'users'

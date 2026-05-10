@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 88 88" fill="none" aria-hidden="true">
+  <defs>
+    <linearGradient id="sg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f9e076"/>
+      <stop offset="45%" stop-color="#d4af37"/>
+      <stop offset="100%" stop-color="#8a6d1f"/>
+    </linearGradient>
+    <linearGradient id="sgInner" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#3d2a0a"/>
+      <stop offset="100%" stop-color="#1a1205"/>
+    </linearGradient>
+  </defs>
+  <circle cx="44" cy="44" r="42" fill="url(#sg)"/>
+  <circle cx="44" cy="44" r="36" fill="url(#sgInner)" opacity="0.92"/>
+  <!-- crown -->
+  <path fill="#d4af37" d="M22 28l6 8 8-10 8 10 8-10 8 10 6-8v6H22v-6z"/>
+  <!-- laurel hints -->
+  <path stroke="#c9a227" stroke-width="1.2" fill="none" stroke-linecap="round" d="M18 52c8-14 52-14 52 0M20 58c14-12 34-12 48 0"/>
+  <!-- letter R -->
+  <text x="44" y="58" text-anchor="middle" font-family="Georgia, serif" font-size="32" font-weight="700" fill="#f5dc7a">R</text>
+  <text x="44" y="69" text-anchor="middle" font-family="system-ui,sans-serif" font-size="5.5" font-weight="700" fill="#d4af37" letter-spacing="0.15em">RICH PAY</text>
+</svg>

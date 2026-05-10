@@ -150,29 +150,35 @@ export function KiDashboardNav({ profile, onNavigate }: Props) {
 
   return (
     <>
-      <div className="ki-app-logo text-center">
-        <Link to="/dashboard" className="d-inline-block" onClick={onNavigate}>
-          <img className="ki-logo-img" src="/assets/images/richpay_logo.svg" alt="Rich Pay" />
+      <div className="ki-sidebar-brand">
+        <Link to="/dashboard" className="ki-brand-lockup" onClick={onNavigate}>
+          <img
+            className="ki-brand-seal"
+            src="/assets/images/richpay_sidebar_seal.svg"
+            alt=""
+            width={46}
+            height={46}
+          />
+          <span className="ki-brand-wordmark">RICH PAY</span>
         </Link>
       </div>
 
       <div className="ki-profile-block">
-        <div className="ki-avatar-wrap d-flex align-items-center justify-content-center">
-          <span className="text-white small fw-bold">{displayName.slice(0, 1).toUpperCase()}</span>
+        <div className="ki-nav-avatar-shell">
+          <div className="ki-nav-avatar" aria-hidden>
+            <span className="ki-nav-avatar-letter">{displayName.slice(0, 1).toUpperCase()}</span>
+          </div>
+          <span className="ki-nav-online-dot" title="Online" />
         </div>
-        <div className="flex-grow-1 overflow-hidden">
-          <h6 className="text-primary mb-0 text-truncate" style={{ color: 'var(--ki-gold)', fontSize: '0.9rem' }}>
-            {displayName}
-          </h6>
-          <p className="text-muted mb-0" style={{ fontSize: '0.75rem' }}>
-            {usernameLine}
-          </p>
+        <div className="flex-grow-1 min-w-0 ps-2">
+          <h6 className="ki-nav-display-name mb-0 text-truncate">{displayName}</h6>
+          <p className="ki-nav-user-id mb-0 text-truncate">{usernameLine}</p>
         </div>
 
         <Dropdown align="end">
           <Dropdown.Toggle
             variant="link"
-            className="text-secondary p-0 border-0"
+            className="ki-nav-gear btn btn-link p-0 border-0 shadow-none"
             aria-label="Account menu"
             bsPrefix="btn"
           >

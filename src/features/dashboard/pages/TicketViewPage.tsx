@@ -1,18 +1,11 @@
-import {
-  collection,
-  doc,
-  getDoc,
-  onSnapshot,
-  orderBy,
-  query,
-  where,
-} from 'firebase/firestore'
+import { onAuthStateChanged } from 'firebase/auth'
+import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore'
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { useAuthState } from '@/hooks/useAuth'
+import { useUserTicketsList } from '@/hooks/useUserTicketsList'
 import { COLLECTIONS } from '@/lib/constants'
-import { db } from '@/lib/firebase'
+import { auth, db } from '@/lib/firebase'
 
 function fmtDate(ms: number) {
   if (!ms) return '—'
@@ -50,59 +43,10 @@ function statusLabel(s: string) {
   return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase()
 }
 
-type ListRow = {
-  id: string
-  createdAtMs: number
-  priority: string
-  department: string
-  subject: string
-  status: string
-}
+const TICKETS_LOAD_ERROR = 'Could not load tickets.'
 
 function TicketViewRepliesList() {
-  const { firebaseUid } = useAuthState()
-  const [rows, setRows] = useState<ListRow[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    if (!firebaseUid) {
-      setLoading(false)
-      return
-    }
-    const q = query(
-      collection(db, COLLECTIONS.tickets),
-      where('userId', '==', firebaseUid),
-      orderBy('createdAt', 'desc'),
-    )
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const next: ListRow[] = []
-        snap.forEach((d) => {
-          const x = d.data()
-          const ts = x.createdAt
-          const createdAtMs =
-            ts && typeof ts.toMillis === 'function' ? ts.toMillis() : Number(x.createdAt ?? 0)
-          next.push({
-            id: d.id,
-            createdAtMs,
-            priority: String(x.priority ?? ''),
-            department: String(x.department ?? ''),
-            subject: String(x.title ?? ''),
-            status: String(x.status ?? ''),
-          })
-        })
-        setRows(next)
-        setLoading(false)
-      },
-      () => {
-        setLoading(false)
-        toast.error('Could not load tickets')
-        setRows([])
-      },
-    )
-    return () => unsub()
-  }, [firebaseUid])
+  const { rows, loading } = useUserTicketsList(TICKETS_LOAD_ERROR)
 
   return (
     <main>
@@ -175,7 +119,6 @@ function TicketViewRepliesList() {
 type ReplyRow = { id: string; text: string; createdAtMs: number }
 
 function TicketThread({ ticketId }: { ticketId: string }) {
-  const { firebaseUid } = useAuthState()
   const [title, setTitle] = useState('')
   const [message, setMessage] = useState('')
   const [department, setDepartment] = useState('')
@@ -187,7 +130,7 @@ function TicketThread({ ticketId }: { ticketId: string }) {
   const [forbidden, setForbidden] = useState(false)
 
   useEffect(() => {
-    if (!firebaseUid || !ticketId) {
+    if (!ticketId) {
       setLoading(false)
       return
     }
@@ -195,81 +138,105 @@ function TicketThread({ ticketId }: { ticketId: string }) {
     let cancelled = false
     let unsubReplies: (() => void) | undefined
 
-    setLoading(true)
-    setForbidden(false)
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      unsubReplies?.()
+      unsubReplies = undefined
 
-    void (async () => {
-      try {
-        const snap = await getDoc(doc(db, COLLECTIONS.tickets, ticketId))
-        if (cancelled) return
-        if (!snap.exists()) {
-          setForbidden(true)
-          setLoading(false)
-          return
-        }
-        const d = snap.data()
-        if (d.userId !== firebaseUid) {
-          setForbidden(true)
-          setLoading(false)
-          return
-        }
-        const ts = d.createdAt
-        const ms =
-          ts && typeof ts.toMillis === 'function' ? ts.toMillis() : Number(d.createdAt ?? 0)
-        setTitle(String(d.title ?? ''))
-        setMessage(String(d.message ?? ''))
-        setDepartment(String(d.department ?? ''))
-        setPriority(String(d.priority ?? ''))
-        setStatus(String(d.status ?? ''))
-        setCreatedAtMs(ms)
+      if (!user || cancelled) {
+        setLoading(false)
+        setTitle('')
+        setMessage('')
+        setReplies([])
         setForbidden(false)
-
-        const rq = query(
-          collection(db, COLLECTIONS.ticketReplies),
-          where('ticketId', '==', ticketId),
-          orderBy('createdAt', 'asc'),
-        )
-        unsubReplies = onSnapshot(
-          rq,
-          (rSnap) => {
-            if (cancelled) {
-              return
-            }
-            const next: ReplyRow[] = []
-            rSnap.forEach((docSnap) => {
-              const r = docSnap.data()
-              const rts = r.createdAt
-              const rms =
-                rts && typeof rts.toMillis === 'function'
-                  ? rts.toMillis()
-                  : Number(r.createdAt ?? 0)
-              const text = String(r.message ?? r.body ?? r.text ?? '')
-              next.push({ id: docSnap.id, text, createdAtMs: rms })
-            })
-            setReplies(next)
-            setLoading(false)
-          },
-          () => {
-            if (!cancelled) {
-              setReplies([])
-              setLoading(false)
-              toast.error('Could not load replies')
-            }
-          },
-        )
-      } catch {
-        if (!cancelled) {
-          toast.error('Could not load ticket')
-          setLoading(false)
-        }
+        return
       }
-    })()
+
+      const uid = user.uid
+      setLoading(true)
+      setForbidden(false)
+
+      void (async () => {
+        try {
+          const snap = await getDoc(doc(db, COLLECTIONS.tickets, ticketId))
+          if (cancelled) return
+          if (!snap.exists()) {
+            setForbidden(true)
+            setLoading(false)
+            return
+          }
+          const d = snap.data()
+          if (d.userId !== uid) {
+            setForbidden(true)
+            setLoading(false)
+            return
+          }
+          const ts = d.createdAt
+          const ms =
+            ts && typeof ts.toMillis === 'function' ? ts.toMillis() : Number(d.createdAt ?? 0)
+          setTitle(String(d.title ?? ''))
+          setMessage(String(d.message ?? ''))
+          setDepartment(String(d.department ?? ''))
+          setPriority(String(d.priority ?? ''))
+          setStatus(String(d.status ?? ''))
+          setCreatedAtMs(ms)
+          setForbidden(false)
+
+          const rq = query(
+            collection(db, COLLECTIONS.ticketReplies),
+            where('ticketId', '==', ticketId),
+          )
+          unsubReplies = onSnapshot(
+            rq,
+            (rSnap) => {
+              if (cancelled) {
+                return
+              }
+              const next: ReplyRow[] = []
+              rSnap.forEach((docSnap) => {
+                const r = docSnap.data()
+                const rts = r.createdAt
+                const rms =
+                  rts && typeof rts.toMillis === 'function'
+                    ? rts.toMillis()
+                    : Number(r.createdAt ?? 0)
+                const text = String(r.message ?? r.body ?? r.text ?? '')
+                next.push({ id: docSnap.id, text, createdAtMs: rms })
+              })
+              next.sort((a, b) => a.createdAtMs - b.createdAtMs)
+              setReplies(next)
+              setLoading(false)
+            },
+            (err: Error & { code?: string }) => {
+              if (!cancelled) {
+                setReplies([])
+                setLoading(false)
+                console.error('[ticketReplies]', err)
+                const code = err?.code ?? ''
+                if (code === 'failed-precondition') {
+                  toast.error(
+                    'Could not load replies. Deploy Firestore indexes: firebase deploy --only firestore:indexes',
+                  )
+                } else {
+                  toast.error('Could not load replies')
+                }
+              }
+            },
+          )
+        } catch {
+          if (!cancelled) {
+            toast.error('Could not load ticket')
+            setLoading(false)
+          }
+        }
+      })()
+    })
 
     return () => {
       cancelled = true
+      unsubAuth()
       unsubReplies?.()
     }
-  }, [ticketId, firebaseUid])
+  }, [ticketId])
 
   if (forbidden) {
     return (

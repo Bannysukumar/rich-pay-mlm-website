@@ -1,9 +1,4 @@
-import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore'
-import { useEffect, useState } from 'react'
-import toast from 'react-hot-toast'
-import { useAuthState } from '@/hooks/useAuth'
-import { COLLECTIONS } from '@/lib/constants'
-import { db } from '@/lib/firebase'
+import { useUserWithdrawalsList } from '@/hooks/useUserWithdrawalsList'
 
 function fmtWithdrawDate(ms: number) {
   if (!ms) return '—'
@@ -25,66 +20,12 @@ function fmtAmount(n: number) {
   return n.toFixed(2)
 }
 
-function pickTxHash(d: Record<string, unknown>): string {
-  const v = d.txHash ?? d.transactionHash ?? d.bscTxHash ?? d.tx
-  return v != null ? String(v).trim() : ''
-}
-
 const BSCSCAN_TX = 'https://bscscan.com/tx/'
 
-type Row = {
-  id: string
-  createdAtMs: number
-  amount: number
-  address: string
-  txHash: string
-}
+const WITHDRAWALS_LOAD_ERROR = 'Could not load withdrawals.'
 
 export function WithdrawReportPage() {
-  const { firebaseUid } = useAuthState()
-  const [rows, setRows] = useState<Row[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    if (!firebaseUid) {
-      setLoading(false)
-      return
-    }
-    const q = query(
-      collection(db, COLLECTIONS.withdrawals),
-      where('userId', '==', firebaseUid),
-      orderBy('createdAt', 'desc'),
-    )
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const next: Row[] = []
-        snap.forEach((docSnap) => {
-          const d = docSnap.data() as Record<string, unknown>
-          const ts = d.createdAt
-          const createdAtMs =
-            ts && typeof (ts as { toMillis?: () => number }).toMillis === 'function'
-              ? (ts as { toMillis: () => number }).toMillis()
-              : Number(d.createdAt ?? 0)
-          next.push({
-            id: docSnap.id,
-            createdAtMs,
-            amount: Number(d.amountGross ?? d.amount ?? 0),
-            address: String(d.address ?? ''),
-            txHash: pickTxHash(d),
-          })
-        })
-        setRows(next)
-        setLoading(false)
-      },
-      () => {
-        setLoading(false)
-        toast.error('Could not load withdrawals')
-        setRows([])
-      },
-    )
-    return () => unsub()
-  }, [firebaseUid])
+  const { rows, loading } = useUserWithdrawalsList(WITHDRAWALS_LOAD_ERROR)
 
   return (
     <main>
@@ -129,7 +70,11 @@ export function WithdrawReportPage() {
                             <td className=" ">{r.address || '—'}</td>
                             <td className=" ">
                               {r.txHash ? (
-                                <a href={`${BSCSCAN_TX}${encodeURIComponent(r.txHash)}`} target="_blank" rel="noreferrer">
+                                <a
+                                  href={`${BSCSCAN_TX}${encodeURIComponent(r.txHash)}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
                                   {r.txHash}
                                 </a>
                               ) : (
