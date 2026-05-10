@@ -26,3 +26,6 @@ serviceAccount*.json
 *.njsproj
 *.sln
 *.sw?
+
+# Firebase local cache
+.firebase

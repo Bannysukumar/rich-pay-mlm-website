@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app'
 import { getAnalytics, isSupported } from 'firebase/analytics'
-import { getAuth } from 'firebase/auth'
+import { getAuth, initializeAuth, indexedDBLocalPersistence } from 'firebase/auth'
 import {
   initializeFirestore,
   persistentLocalCache,
@@ -24,7 +24,21 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig)
 
-export const auth = getAuth(app)
+/** Prefer IndexedDB persistence so sessions survive closing the browser after “stay signed in”. */
+function getOrInitAuth() {
+  if (typeof window === 'undefined') {
+    return getAuth(app)
+  }
+  try {
+    return initializeAuth(app, {
+      persistence: indexedDBLocalPersistence,
+    })
+  } catch {
+    return getAuth(app)
+  }
+}
+
+export const auth = getOrInitAuth()
 
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({

@@ -20,3 +20,10 @@ export async function registerWithProfile(payload: RegisterPayload): Promise<Reg
   const data = res.data as RegisterResult
   return data
 }
+
+/** No auth — used on public register page to show sponsor full name. */
+export async function publicResolveReferrerCallable(username: string): Promise<{ found: boolean; fullName: string }> {
+  const fn = getHttpsCallable('publicResolveReferrer')
+  const res = await fn({ username })
+  return res.data as { found: boolean; fullName: string }
+}

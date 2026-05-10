@@ -1,0 +1,366 @@
+/* Admin console — matches member #ki-dashboard-root dark theme (Rubik, gold accent, panel grays) */
+@import url('https://fonts.googleapis.com/css2?family=Rubik:ital,wght@0,300..900;1,300..900&display=swap');
+
+#admin-dashboard-root {
+  font-family: 'Rubik', system-ui, sans-serif;
+  --admin-gold: #d4af37;
+  --admin-bg: #141518;
+  --admin-panel: #1a1d21;
+  --admin-border: rgba(212, 175, 55, 0.15);
+  --admin-muted: #9898a8;
+  --admin-body-fg: #e4e4e7;
+  --admin-header-bg: rgba(12, 12, 16, 0.92);
+  --admin-icon-bg: rgba(255, 255, 255, 0.06);
+  --admin-nav-fg: #c4c4ce;
+  --admin-nav-muted: #6b6b7c;
+  --admin-teal-name: #2dd4bf;
+  background: var(--admin-bg);
+  color: var(--admin-body-fg);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+#admin-dashboard-root *,
+#admin-dashboard-root *::before,
+#admin-dashboard-root *::after {
+  box-sizing: border-box;
+}
+
+#admin-dashboard-root .admin-app-wrapper {
+  display: flex;
+  min-height: 100vh;
+}
+
+#admin-dashboard-root .admin-sidebar {
+  width: 278px;
+  flex-shrink: 0;
+  background: var(--admin-panel);
+  border-right: 1px solid var(--admin-border);
+  display: flex;
+  flex-direction: column;
+  z-index: 1040;
+}
+
+#admin-dashboard-root .admin-sidebar-brand {
+  padding: 1rem 1rem 0.85rem;
+  border-bottom: 1px solid var(--admin-border);
+}
+
+#admin-dashboard-root .admin-brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+#admin-dashboard-root .admin-brand-lockup:hover .admin-brand-wordmark {
+  color: #f0d878;
+}
+
+#admin-dashboard-root .admin-brand-seal {
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+#admin-dashboard-root .admin-brand-wordmark {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--admin-gold);
+  text-transform: uppercase;
+  line-height: 1.1;
+  transition: color 0.15s ease;
+}
+
+#admin-dashboard-root .admin-brand-sub {
+  margin: 0.15rem 0 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--admin-nav-muted);
+}
+
+#admin-dashboard-root .admin-profile-block {
+  padding: 0.85rem 1rem 1rem;
+  border-bottom: 1px solid var(--admin-border);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#admin-dashboard-root .admin-nav-avatar-shell {
+  position: relative;
+  flex-shrink: 0;
+  width: 45px;
+  height: 45px;
+}
+
+#admin-dashboard-root .admin-nav-avatar {
+  width: 45px;
+  height: 45px;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, #9a7b2c, var(--admin-gold));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+#admin-dashboard-root .admin-nav-avatar-letter {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #141518;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+#admin-dashboard-root .admin-nav-online-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #22c55e;
+  border: 2px solid var(--admin-panel);
+  box-sizing: content-box;
+}
+
+#admin-dashboard-root .admin-nav-display-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--admin-teal-name);
+  margin: 0;
+  line-height: 1.25;
+}
+
+#admin-dashboard-root .admin-nav-role {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--admin-gold);
+  margin: 0.15rem 0 0;
+  opacity: 0.95;
+}
+
+#admin-dashboard-root .admin-nav-meta {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #ffffff;
+  margin: 0.1rem 0 0;
+  opacity: 0.92;
+}
+
+#admin-dashboard-root .admin-nav-scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.5rem 0 1rem;
+}
+
+#admin-dashboard-root .admin-nav-section + .admin-nav-section {
+  margin-top: 0.25rem;
+}
+
+#admin-dashboard-root .admin-menu-title {
+  display: block;
+  padding: 0.75rem 1.25rem 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--admin-nav-muted);
+}
+
+#admin-dashboard-root .admin-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: calc(100% - 8px);
+  margin: 2px 4px;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--admin-nav-fg);
+  text-decoration: none;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+#admin-dashboard-root .admin-nav-link:hover {
+  background: rgba(212, 175, 55, 0.08);
+  color: var(--admin-gold);
+}
+
+#admin-dashboard-root .admin-nav-link.active {
+  background: rgba(212, 175, 55, 0.1);
+  color: var(--admin-gold);
+  box-shadow: inset 0 0 0 1px rgba(212, 175, 55, 0.2);
+}
+
+#admin-dashboard-root .admin-nav-link .admin-nav-ico {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  opacity: 0.88;
+  color: var(--admin-nav-muted);
+}
+
+#admin-dashboard-root .admin-nav-link:hover .admin-nav-ico,
+#admin-dashboard-root .admin-nav-link.active .admin-nav-ico {
+  opacity: 1;
+  color: var(--admin-gold);
+}
+
+#admin-dashboard-root .admin-sidebar-footer {
+  padding: 0.85rem 1rem 1rem;
+  border-top: 1px solid var(--admin-border);
+}
+
+#admin-dashboard-root .admin-back-member {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0.55rem 1rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--admin-nav-fg);
+  text-decoration: none;
+  border: 1px solid var(--admin-border);
+  background: rgba(0, 0, 0, 0.2);
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+#admin-dashboard-root .admin-back-member:hover {
+  background: rgba(212, 175, 55, 0.08);
+  color: var(--admin-gold);
+  border-color: rgba(212, 175, 55, 0.35);
+}
+
+#admin-dashboard-root .admin-sidebar a {
+  color: inherit;
+}
+
+#admin-dashboard-root .admin-app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--admin-bg);
+}
+
+#admin-dashboard-root .admin-header-main {
+  border-bottom: 1px solid var(--admin-border);
+  background: var(--admin-header-bg);
+  backdrop-filter: blur(12px);
+  padding: 0.65rem 0;
+}
+
+#admin-dashboard-root .admin-head-icon {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--admin-icon-bg);
+  color: var(--admin-muted);
+  border: none;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+#admin-dashboard-root .admin-head-icon:hover {
+  color: var(--admin-gold);
+}
+
+#admin-dashboard-root .admin-content {
+  flex: 1;
+  padding: 1rem 1.25rem 2.5rem;
+}
+
+@media (min-width: 768px) {
+  #admin-dashboard-root .admin-content {
+    padding: 1.25rem 2rem 2.75rem;
+  }
+}
+
+@media (min-width: 1200px) {
+  #admin-dashboard-root .admin-content {
+    padding: 1.5rem 2.75rem 3rem;
+    max-width: 1600px;
+    margin: 0 auto;
+    width: 100%;
+  }
+}
+
+/* Stat + panel cards aligned with Ki referral/stat feel */
+#admin-dashboard-root .admin-stat-card {
+  background: var(--admin-panel);
+  border: 1px solid var(--admin-border);
+  border-radius: 14px;
+  padding: 1.15rem 1.2rem;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+#admin-dashboard-root .admin-stat-card:hover {
+  border-color: rgba(212, 175, 55, 0.28);
+  box-shadow: 0 12px 36px -20px rgba(212, 175, 55, 0.12);
+}
+
+#admin-dashboard-root .admin-stat-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--admin-icon-bg);
+  color: var(--admin-gold);
+}
+
+#admin-dashboard-root .admin-panel-sheet {
+  background: var(--admin-panel);
+  border: 1px solid var(--admin-border);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+#admin-dashboard-root .admin-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--admin-gold);
+  background: rgba(212, 175, 55, 0.1);
+  border: 1px solid rgba(212, 175, 55, 0.25);
+}
+
+#admin-dashboard-root .admin-divider-soft {
+  border-color: var(--admin-border);
+}

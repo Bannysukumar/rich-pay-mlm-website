@@ -1,5 +1,5 @@
 import { collection, onSnapshot, query, where } from 'firebase/firestore'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import toast from 'react-hot-toast'
 import { activatePackageCallable, resolveUsernameCallable } from '@/lib/api/financeCallables'
@@ -8,53 +8,72 @@ import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 import type { PackageDef } from '@/types/models'
 
-const PACKAGE_TIERS = [
-  { value: '1', label: '$ 100' },
-  { value: '2', label: '$ 200' },
-  { value: '3', label: '$ 300' },
-  { value: '4', label: '$ 400' },
-  { value: '5', label: '$ 500' },
-] as const
-
-function tierAmount(entry: string): number {
-  const n = Number(entry)
-  if (!Number.isFinite(n) || n < 1 || n > 5) return 0
-  return n * 100
-}
-
-function findPackageForAmount(amount: number, packages: PackageDef[]): PackageDef | undefined {
-  return packages.find((p) => amount >= p.minAmount && amount <= p.maxAmount)
+function sortPackages(list: PackageDef[]): PackageDef[] {
+  return [...list].sort((a, b) => {
+    const ao = a.sortOrder ?? 0
+    const bo = b.sortOrder ?? 0
+    if (ao !== bo) return ao - bo
+    return a.minAmount - b.minAmount
+  })
 }
 
 export function PackageTopupPage() {
   const { profile } = useAuthState()
   const [packages, setPackages] = useState<PackageDef[]>([])
+  const [selectedPackageId, setSelectedPackageId] = useState('')
+  const [amountInput, setAmountInput] = useState('')
   const [idno, setIdno] = useState('')
   const [rname, setRname] = useState('')
-  const [entry, setEntry] = useState('1')
   const [ptype, setPtype] = useState('-1')
   const [cpin, setCpin] = useState('')
   const [busy, setBusy] = useState(false)
 
+  const sortedPackages = useMemo(() => sortPackages(packages), [packages])
+
+  const selectedPkg = useMemo(
+    () => sortedPackages.find((p) => p.id === selectedPackageId),
+    [sortedPackages, selectedPackageId],
+  )
+
   useEffect(() => {
     const q = query(collection(db, COLLECTIONS.packages), where('active', '==', true))
     return onSnapshot(q, (snap) => {
-      setPackages(
-        snap.docs.map((d) => {
-          const x = d.data() as Record<string, unknown>
-          return {
-            id: d.id,
-            name: String(x.name ?? 'Package'),
-            minAmount: Number(x.minAmount ?? 0),
-            maxAmount: Number(x.maxAmount ?? 0),
-            roiPercent: Number(x.roiPercent ?? 0),
-            durationDays: Number(x.durationDays ?? 0),
-            active: Boolean(x.active),
-          }
-        }),
-      )
+      const next: PackageDef[] = snap.docs.map((d) => {
+        const x = d.data() as Record<string, unknown>
+        return {
+          id: d.id,
+          name: String(x.name ?? 'Package'),
+          minAmount: Number(x.minAmount ?? 0),
+          maxAmount: Number(x.maxAmount ?? 0),
+          roiPercent: Number(x.roiPercent ?? 0),
+          durationDays: Number(x.durationDays ?? 0),
+          active: Boolean(x.active),
+          sortOrder: Number(x.sortOrder ?? 0),
+        }
+      })
+      setPackages(next)
     })
   }, [])
+
+  useEffect(() => {
+    if (sortedPackages.length === 0) {
+      setSelectedPackageId('')
+      return
+    }
+    const stillValid = sortedPackages.some((p) => p.id === selectedPackageId)
+    if (!stillValid) setSelectedPackageId(sortedPackages[0].id)
+  }, [sortedPackages, selectedPackageId])
+
+  useEffect(() => {
+    if (!selectedPkg) {
+      setAmountInput('')
+      return
+    }
+    const min = selectedPkg.minAmount
+    const max = selectedPkg.maxAmount
+    const lo = Math.min(min, max)
+    setAmountInput(String(lo))
+  }, [selectedPkg])
 
   useEffect(() => {
     if (profile?.username) {
@@ -80,6 +99,10 @@ export function PackageTopupPage() {
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (!profile) return
+    if (!selectedPkg) {
+      toast.error('No package available — ask admin to publish packages.')
+      return
+    }
     if (ptype === '-1') {
       toast.error('Select Plan')
       return
@@ -88,16 +111,21 @@ export function PackageTopupPage() {
       toast.error('Enter transaction password')
       return
     }
-    const amount = tierAmount(entry)
-    const pkg = findPackageForAmount(amount, packages)
-    if (!pkg) {
-      toast.error('No package matches this tier — check admin package ranges.')
+    const amount = Number(amountInput)
+    const min = Math.min(selectedPkg.minAmount, selectedPkg.maxAmount)
+    const max = Math.max(selectedPkg.minAmount, selectedPkg.maxAmount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Enter a valid package amount')
+      return
+    }
+    if (amount < min || amount > max) {
+      toast.error(`Amount must be between $${min} and $${max} for "${selectedPkg.name}"`)
       return
     }
     setBusy(true)
     try {
       await activatePackageCallable({
-        packageId: pkg.id,
+        packageId: selectedPkg.id,
         amount,
         beneficiaryUsername: idno.trim(),
         transactionPassword: cpin.trim() || undefined,
@@ -116,6 +144,10 @@ export function PackageTopupPage() {
 
   const act = profile?.wallets.activation ?? 0
   const dep = profile?.wallets.deposit ?? 0
+
+  const minAmt = selectedPkg ? Math.min(selectedPkg.minAmount, selectedPkg.maxAmount) : 0
+  const maxAmt = selectedPkg ? Math.max(selectedPkg.minAmount, selectedPkg.maxAmount) : 0
+  const fixedAmountOnly = selectedPkg != null && minAmt === maxAmt
 
   return (
     <main>
@@ -158,23 +190,52 @@ export function PackageTopupPage() {
                         onChange={(e) => setRname(e.target.value)}
                       />
                     </div>
-                    <label className="form-label" htmlFor="entry">
+                    <label className="form-label" htmlFor="packageId">
                       Select Package
                     </label>
                     <select
-                      name="entry"
-                      id="entry"
+                      name="packageId"
+                      id="packageId"
                       className="default-select form-control wide mb-3"
-                      value={entry}
-                      onChange={(e) => setEntry(e.target.value)}
-                      disabled={busy}
+                      value={selectedPackageId}
+                      onChange={(e) => setSelectedPackageId(e.target.value)}
+                      disabled={busy || sortedPackages.length === 0}
                     >
-                      {PACKAGE_TIERS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
+                      {sortedPackages.length === 0 ? (
+                        <option value="">No packages available</option>
+                      ) : (
+                        sortedPackages.map((p) => {
+                          const lo = Math.min(p.minAmount, p.maxAmount)
+                          const hi = Math.max(p.minAmount, p.maxAmount)
+                          const range = lo === hi ? `$${lo}` : `$${lo} – $${hi}`
+                          return (
+                            <option key={p.id} value={p.id}>
+                              {p.name} ({range})
+                            </option>
+                          )
+                        })
+                      )}
                     </select>
+                    {selectedPkg && (
+                      <div className="mb-3">
+                        <label className="form-label" htmlFor="amount">
+                          Amount (USDT){fixedAmountOnly ? ' — fixed for this package' : ` — allowed $${minAmt}–$${maxAmt}`}
+                        </label>
+                        <input
+                          type="number"
+                          name="amount"
+                          id="amount"
+                          className="form-control input-default"
+                          min={minAmt}
+                          max={maxAmt}
+                          step="0.01"
+                          value={amountInput}
+                          onChange={(e) => setAmountInput(e.target.value)}
+                          disabled={busy || fixedAmountOnly}
+                          required
+                        />
+                      </div>
+                    )}
                     <select
                       name="ptype"
                       id="ptype"
@@ -201,7 +262,7 @@ export function PackageTopupPage() {
                         autoComplete="new-password"
                       />
                     </div>
-                    <button type="submit" className="btn btn-primary" disabled={busy}>
+                    <button type="submit" className="btn btn-primary" disabled={busy || !selectedPkg}>
                       {busy ? 'Submitting…' : 'Submit'}
                     </button>
                   </form>

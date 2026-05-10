@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import * as admin from 'firebase-admin'
 import { FieldValue, Timestamp, type DocumentSnapshot } from 'firebase-admin/firestore'
-import { onDocumentUpdated } from 'firebase-functions/v2/firestore'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 
@@ -46,6 +45,13 @@ function audit(actorUid: string, action: string, detail: Record<string, unknown>
     detail,
     createdAt: FieldValue.serverTimestamp(),
   })
+}
+
+async function assertFirestoreAdmin(actorUid: string) {
+  const snap = await db.collection(COL_USERS).doc(actorUid).get()
+  if (!snap.exists || String(snap.data()?.role ?? '') !== 'admin') {
+    throw new HttpsError('permission-denied', 'Administrator only')
+  }
 }
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
@@ -424,6 +430,22 @@ export const resolveUsername = onCall(callableRuntimeOpts, async (request) => {
   if (!uSnap.exists) return { fullName: 'Invalid Id' }
   const fn = String(uSnap.data()!.fullName ?? '').trim()
   return { fullName: fn || '—' }
+})
+
+/** Registration / invite links: resolve referral username → public display name (no sign-in required). */
+export const publicResolveReferrer = onCall(callableRuntimeOpts, async (request) => {
+  const raw = String((request.data as { username?: string })?.username ?? '').trim()
+  if (!raw || raw.length > 96) {
+    throw new HttpsError('invalid-argument', 'Invalid referral ID')
+  }
+  const key = raw.toLowerCase()
+  const mapSnap = await db.collection(COL_USERS_BY_UN).doc(key).get()
+  if (!mapSnap.exists) return { found: false, fullName: '' }
+  const bid = mapSnap.data()!.uid as string
+  const uSnap = await db.collection(COL_USERS).doc(bid).get()
+  if (!uSnap.exists) return { found: false, fullName: '' }
+  const fn = String(uSnap.data()!.fullName ?? '').trim()
+  return { found: true, fullName: fn || '—' }
 })
 
 export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
@@ -835,35 +857,320 @@ export const internalTransfer = onCall(callableRuntimeOpts, async (request) => {
   await audit(uid, 'internalTransfer', { amount, recipientUid, recipientUsername: recipRaw })
 })
 
-export const onDepositApproved = onDocumentUpdated(`${COL_DEPOSITS}/{id}`, async (event) => {
-  const before = event.data?.before.data()
-  const after = event.data?.after.data()
-  if (!before || !after) return
-  if (before.status !== 'pending' || after.status !== 'approved') return
+/**
+ * Approve / reject (refund) / mark paid withdrawals. Reject only from `pending` refunds cash + totalWithdrawn.
+ */
+export const adminWithdrawalUpdate = onCall(callableRuntimeOpts, async (request) => {
+  if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')
+  const actorUid = request.auth.uid
+  await assertFirestoreAdmin(actorUid)
 
-  const userId = String(after.userId)
-  const amount = Number(after.amount ?? 0)
-  await db
-    .collection(COL_USERS)
-    .doc(userId)
-    .set(
-      {
-        'wallets.deposit': FieldValue.increment(amount),
+  const data = request.data as {
+    withdrawalId?: string
+    next?: 'processing' | 'approved' | 'rejected' | 'paid'
+    txHash?: string
+  }
+  const withdrawalId = String(data.withdrawalId || '').trim()
+  const next = data.next
+  const txHash = data.txHash != null ? String(data.txHash).trim() : ''
+
+  if (!withdrawalId || !next) {
+    throw new HttpsError('invalid-argument', 'withdrawalId and next are required')
+  }
+
+  const ref = db.collection(COL_WITHDRAWALS).doc(withdrawalId)
+  const mailbox: { userId: string; title: string; body: string }[] = []
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists) throw new HttpsError('not-found', 'Withdrawal not found')
+    const d = snap.data()!
+    const cur = String(d.status || '')
+    const uid = String(d.userId)
+    const gross = Number(d.amountGross ?? 0)
+
+    if (next === 'rejected') {
+      if (cur !== 'pending' && cur !== 'processing') {
+        throw new HttpsError('failed-precondition', 'Only pending or processing withdrawals can be rejected')
+      }
+      tx.update(ref, {
+        status: 'rejected',
+        reviewedAt: FieldValue.serverTimestamp(),
         updatedAt: Date.now(),
-      },
-      { merge: true },
-    )
+      })
+      tx.update(db.collection(COL_USERS).doc(uid), {
+        'wallets.cash': FieldValue.increment(gross),
+        totalWithdrawn: FieldValue.increment(-gross),
+        updatedAt: Date.now(),
+      })
+      mailbox.push({
+        userId: uid,
+        title: 'Withdrawal rejected',
+        body: `${gross} USDT was returned to your cash wallet.`,
+      })
+      return
+    }
 
-  await db.collection('notifications').add({
-    userId,
-    title: 'Deposit approved',
-    body: `${amount} USDT credited to deposit wallet`,
-    createdAt: FieldValue.serverTimestamp(),
-    read: false,
+    if (next === 'processing') {
+      if (cur === 'processing') {
+        throw new HttpsError('failed-precondition', 'Withdrawal is already processing')
+      }
+      if (cur !== 'pending' && cur !== 'approved') {
+        throw new HttpsError(
+          'failed-precondition',
+          'Only pending or approved withdrawals can be marked processing',
+        )
+      }
+      tx.update(ref, {
+        status: 'processing',
+        processingAt: FieldValue.serverTimestamp(),
+        updatedAt: Date.now(),
+      })
+      mailbox.push({
+        userId: uid,
+        title: 'Withdrawal processing',
+        body: 'Your withdrawal is being processed for payout.',
+      })
+      return
+    }
+
+    if (next === 'approved') {
+      if (cur !== 'pending' && cur !== 'processing') {
+        throw new HttpsError('failed-precondition', 'Only pending or processing withdrawals can be approved')
+      }
+      tx.update(ref, {
+        status: 'approved',
+        reviewedAt: FieldValue.serverTimestamp(),
+        updatedAt: Date.now(),
+      })
+      mailbox.push({
+        userId: uid,
+        title: 'Withdrawal approved',
+        body: 'Your withdrawal is approved and will be processed for payout.',
+      })
+      return
+    }
+
+    if (next === 'paid') {
+      if (cur !== 'pending' && cur !== 'approved' && cur !== 'processing') {
+        throw new HttpsError('failed-precondition', 'Withdrawal must be pending, approved, or processing')
+      }
+      if (!txHash) {
+        throw new HttpsError('invalid-argument', 'txHash is required to mark paid')
+      }
+      tx.update(ref, {
+        status: 'paid',
+        txId: txHash,
+        paidAt: FieldValue.serverTimestamp(),
+        updatedAt: Date.now(),
+      })
+      mailbox.push({
+        userId: uid,
+        title: 'Withdrawal paid',
+        body: `Sent. TX: ${txHash}`,
+      })
+      return
+    }
+
+    throw new HttpsError('invalid-argument', 'Invalid next status')
   })
+
+  const note = mailbox[0]
+  if (note) {
+    await db.collection('notifications').add({
+      userId: note.userId,
+      title: note.title,
+      body: note.body,
+      read: false,
+      createdAt: FieldValue.serverTimestamp(),
+    })
+  }
+
+  await audit(actorUid, 'adminWithdrawalUpdate', { withdrawalId, next })
+  return { ok: true }
 })
 
-export const processDailyRoi = onSchedule('every 24 hours', async () => {
+/**
+ * Admin approves/rejects a deposit. Approval credits `wallets.deposit` in the same transaction as the status flip
+ * (fixes missed credits when only Firestore was updated from the console or an older client).
+ * Idempotent: repeats do not double-credit when `walletCreditApplied` is already true.
+ */
+export const adminFinalizeDeposit = onCall(callableRuntimeOpts, async (request) => {
+  if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')
+  const actorUid = request.auth.uid
+  await assertFirestoreAdmin(actorUid)
+
+  const data = request.data as { depositId?: string; decision?: string; adminNote?: string | null }
+  const depositId = String(data.depositId ?? '').trim()
+  const decision = String(data.decision ?? '').trim().toLowerCase()
+  const rawNote = data.adminNote != null ? String(data.adminNote).trim() : ''
+  const notePatch = rawNote.length > 0 ? { adminNote: rawNote } : {}
+
+  if (!depositId) {
+    throw new HttpsError('invalid-argument', 'depositId is required')
+  }
+  if (decision !== 'approved' && decision !== 'rejected') {
+    throw new HttpsError('invalid-argument', 'decision must be approved or rejected')
+  }
+
+  const depRef = db.collection(COL_DEPOSITS).doc(depositId)
+
+  if (decision === 'rejected') {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(depRef)
+      if (!snap.exists) throw new HttpsError('not-found', 'Deposit not found')
+      const d = snap.data()!
+      const cur = String(d.status ?? '')
+        .trim()
+        .toLowerCase()
+      if (cur !== 'pending') {
+        throw new HttpsError('failed-precondition', 'Only pending deposits can be rejected')
+      }
+      tx.update(depRef, {
+        status: 'rejected',
+        reviewedAt: FieldValue.serverTimestamp(),
+        ...notePatch,
+      })
+    })
+    await audit(actorUid, 'adminDepositRejected', { depositId })
+    return { ok: true, credited: 0 }
+  }
+
+  let notifyUserId = ''
+  const creditedAmount = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(depRef)
+    if (!snap.exists) throw new HttpsError('not-found', 'Deposit not found')
+    const d = snap.data()!
+    const cur = String(d.status ?? '')
+      .trim()
+      .toLowerCase()
+    const alreadyCredited = d.walletCreditApplied === true
+
+    if (alreadyCredited && cur === 'approved') {
+      return 0
+    }
+
+    const amount = Number(d.amount ?? 0)
+    const userId = String(d.userId ?? '').trim()
+    if (!userId || !Number.isFinite(amount) || amount <= 0) {
+      throw new HttpsError('failed-precondition', 'Invalid deposit amount or member id')
+    }
+    notifyUserId = userId
+
+    const userRef = db.collection(COL_USERS).doc(userId)
+
+    if (cur === 'pending' && alreadyCredited) {
+      tx.update(depRef, {
+        status: 'approved',
+        reviewedAt: FieldValue.serverTimestamp(),
+        walletCreditApplied: true,
+        walletCreditAppliedAt: FieldValue.serverTimestamp(),
+        ...notePatch,
+      })
+      return 0
+    }
+
+    if (!alreadyCredited) {
+      tx.set(
+        userRef,
+        {
+          'wallets.deposit': FieldValue.increment(amount),
+          updatedAt: Date.now(),
+        },
+        { merge: true },
+      )
+    }
+
+    if (cur === 'pending') {
+      tx.update(depRef, {
+        status: 'approved',
+        reviewedAt: FieldValue.serverTimestamp(),
+        walletCreditApplied: true,
+        walletCreditAppliedAt: FieldValue.serverTimestamp(),
+        ...notePatch,
+      })
+      return alreadyCredited ? 0 : amount
+    }
+
+    if (cur === 'approved') {
+      tx.update(depRef, {
+        walletCreditApplied: true,
+        walletCreditAppliedAt: FieldValue.serverTimestamp(),
+        ...notePatch,
+      })
+      return alreadyCredited ? 0 : amount
+    }
+
+    throw new HttpsError(
+      'failed-precondition',
+      'Deposit cannot be approved — not pending nor an approved row missing wallet credit.',
+    )
+  })
+
+  if (creditedAmount > 0 && notifyUserId) {
+    await db.collection('notifications').add({
+      userId: notifyUserId,
+      title: 'Deposit approved',
+      body: `${creditedAmount} USDT credited to your deposit wallet`,
+      read: false,
+      createdAt: FieldValue.serverTimestamp(),
+    })
+  }
+
+  await audit(actorUid, 'adminFinalizeDeposit', { depositId, decision, creditedAmount })
+  return { ok: true, credited: creditedAmount }
+})
+
+/** Push the same notification document to every user (batched). */
+export const adminBroadcastNotification = onCall(callableRuntimeOpts, async (request) => {
+  if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')
+  const actorUid = request.auth.uid
+  await assertFirestoreAdmin(actorUid)
+
+  const data = request.data as { title?: string; body?: string }
+  const title = String(data.title || '').trim()
+  const body = String(data.body || '').trim()
+  if (!title || !body) {
+    throw new HttpsError('invalid-argument', 'Title and body required')
+  }
+
+  const snap = await db.collection(COL_USERS).get()
+  let total = 0
+  const docs = snap.docs
+  for (let i = 0; i < docs.length; i += 400) {
+    const batch = db.batch()
+    for (const d of docs.slice(i, i + 400)) {
+      const ref = db.collection('notifications').doc()
+      batch.set(ref, {
+        userId: d.id,
+        title,
+        body,
+        read: false,
+        createdAt: FieldValue.serverTimestamp(),
+      })
+      total++
+    }
+    await batch.commit()
+  }
+
+  await audit(actorUid, 'adminBroadcastNotification', { total, title })
+  return { sent: total }
+})
+
+/** Nightly ROI accrual — explicit region/schedule avoids flaky scheduler deploy (“HTML not JSON”). */
+export const processDailyRoi = onSchedule(
+  {
+    schedule: '0 2 * * *',
+    timeZone: 'Etc/UTC',
+    region: 'us-central1',
+    memory: '512MiB',
+    timeoutSeconds: 540,
+  },
+  async () => {
+  const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get()
+  if (settingsSnap.exists && settingsSnap.data()?.roiEnabled === false) {
+    return
+  }
   const now = Timestamp.now()
   const snap = await db.collection(COL_ACTIVE).where('status', '==', 'active').get()
 
@@ -908,4 +1215,5 @@ export const processDailyRoi = onSchedule('every 24 hours', async () => {
       createdAt: FieldValue.serverTimestamp(),
     })
   }
-})
+  },
+)

@@ -633,6 +633,30 @@
   }
 }
 
+/** `/contact`: show 1–3 cards depending on configured channels */
+.landing-root .contact-grid-adaptive {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 22px;
+}
+
+@media (min-width: 560px) {
+  .landing-root .contact-grid-adaptive {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+}
+
+.landing-root a.contact-channel-link {
+  color: inherit;
+  text-decoration: none;
+  transition: color 0.2s ease, text-decoration-color 0.2s ease;
+}
+
+.landing-root a.contact-channel-link:hover {
+  text-decoration: underline;
+  color: #f5d76e;
+}
+
 .landing-root .contact-info-card.card.glass {
   padding: 38px 28px 42px;
   border-radius: 20px;
@@ -1522,6 +1546,17 @@
   margin: 6px 0 0;
   font-size: 0.8rem;
   color: #f87171;
+}
+
+.landing-root.auth-page-shell .auth-field-hint {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: #a8a8b8;
+}
+
+.landing-root.auth-page-shell .auth-referrer-hint .text-muted {
+  color: #888;
 }
 
 .landing-root.auth-page-shell .auth-forgot-wrap {

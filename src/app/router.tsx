@@ -6,8 +6,25 @@ import { RegisterPage } from '@/features/auth/RegisterPage'
 import { RegisterSuccessPage } from '@/features/auth/RegisterSuccessPage'
 import { AdminLayout } from '@/features/admin/layout/AdminLayout'
 import { AdminHome } from '@/features/admin/pages/AdminHome'
-import { AdminPlaceholder } from '@/features/admin/pages/AdminPlaceholder'
+import { AdminAuditPage } from '@/features/admin/pages/AdminAuditPage'
+import { AdminCmsPage } from '@/features/admin/pages/AdminCmsPage'
+import { AdminDepositsPage } from '@/features/admin/pages/AdminDepositsPage'
+import { AdminMaintenancePage } from '@/features/admin/pages/AdminMaintenancePage'
+import { AdminNotificationsPage } from '@/features/admin/pages/AdminNotificationsPage'
+import { AdminPackagesPage } from '@/features/admin/pages/AdminPackagesPage'
+import { AdminQrPage } from '@/features/admin/pages/AdminQrPage'
+import { AdminRanksPage } from '@/features/admin/pages/AdminRanksPage'
+import { AdminReportsPage } from '@/features/admin/pages/AdminReportsPage'
+import { AdminRoiPage } from '@/features/admin/pages/AdminRoiPage'
+import { AdminSeoPage } from '@/features/admin/pages/AdminSeoPage'
 import { AdminSiteSettings } from '@/features/admin/pages/AdminSiteSettings'
+import { AdminSponsorPage } from '@/features/admin/pages/AdminSponsorPage'
+import { AdminTeamLevelsPage } from '@/features/admin/pages/AdminTeamLevelsPage'
+import { AdminTicketsPage } from '@/features/admin/pages/AdminTicketsPage'
+import { AdminTransferSettingsPage } from '@/features/admin/pages/AdminTransferSettingsPage'
+import { AdminUsersPage } from '@/features/admin/pages/AdminUsersPage'
+import { AdminWalletSettingsPage } from '@/features/admin/pages/AdminWalletSettingsPage'
+import { AdminWithdrawalsPage } from '@/features/admin/pages/AdminWithdrawalsPage'
 import { DashboardLayout } from '@/features/dashboard/layout/DashboardLayout'
 import { ChangePasswordPage } from '@/features/dashboard/pages/ChangePasswordPage'
 import { DashboardHome } from '@/features/dashboard/pages/DashboardHome'
@@ -151,25 +168,25 @@ export function AppRouter() {
         }
       >
         <Route index element={<AdminHome />} />
-        <Route path="users" element={<AdminPlaceholder title="User Management" />} />
-        <Route path="deposits" element={<AdminPlaceholder title="Deposit Management" />} />
-        <Route path="withdrawals" element={<AdminPlaceholder title="Withdrawal Management" />} />
-        <Route path="packages" element={<AdminPlaceholder title="Package Management" />} />
-        <Route path="roi" element={<AdminPlaceholder title="ROI Settings" />} />
-        <Route path="sponsor" element={<AdminPlaceholder title="Sponsor Bonus Settings" />} />
-        <Route path="team-levels" element={<AdminPlaceholder title="Team Level Settings" />} />
-        <Route path="ranks" element={<AdminPlaceholder title="Rank Bonus Settings" />} />
-        <Route path="wallets" element={<AdminPlaceholder title="Wallet Settings" />} />
-        <Route path="qr" element={<AdminPlaceholder title="QR Code & Wallet Address" />} />
-        <Route path="transfers" element={<AdminPlaceholder title="Transfer Settings" />} />
-        <Route path="tickets" element={<AdminPlaceholder title="Ticket Management" />} />
-        <Route path="notifications" element={<AdminPlaceholder title="Notifications" />} />
-        <Route path="cms" element={<AdminPlaceholder title="CMS Management" />} />
-        <Route path="seo" element={<AdminPlaceholder title="SEO Settings" />} />
+        <Route path="users" element={<AdminUsersPage />} />
+        <Route path="deposits" element={<AdminDepositsPage />} />
+        <Route path="withdrawals" element={<AdminWithdrawalsPage />} />
+        <Route path="packages" element={<AdminPackagesPage />} />
+        <Route path="roi" element={<AdminRoiPage />} />
+        <Route path="sponsor" element={<AdminSponsorPage />} />
+        <Route path="team-levels" element={<AdminTeamLevelsPage />} />
+        <Route path="ranks" element={<AdminRanksPage />} />
+        <Route path="wallets" element={<AdminWalletSettingsPage />} />
+        <Route path="qr" element={<AdminQrPage />} />
+        <Route path="transfers" element={<AdminTransferSettingsPage />} />
+        <Route path="tickets" element={<AdminTicketsPage />} />
+        <Route path="notifications" element={<AdminNotificationsPage />} />
+        <Route path="cms" element={<AdminCmsPage />} />
+        <Route path="seo" element={<AdminSeoPage />} />
         <Route path="site" element={<AdminSiteSettings />} />
-        <Route path="reports" element={<AdminPlaceholder title="Reports & Exports" />} />
-        <Route path="audit" element={<AdminPlaceholder title="Audit Logs" />} />
-        <Route path="maintenance" element={<AdminSiteSettings />} />
+        <Route path="reports" element={<AdminReportsPage />} />
+        <Route path="audit" element={<AdminAuditPage />} />
+        <Route path="maintenance" element={<AdminMaintenancePage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

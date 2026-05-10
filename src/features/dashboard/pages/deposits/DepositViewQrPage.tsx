@@ -1,6 +1,5 @@
 import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore'
 import { useEffect, useMemo, useState } from 'react'
-import { QRCodeSVG } from 'qrcode.react'
 import toast from 'react-hot-toast'
 import { useAuthState } from '@/hooks/useAuth'
 import { useSiteSettings } from '@/hooks/useSiteSettings'
@@ -30,9 +29,21 @@ function fmtDateTime(ms: number) {
   })
 }
 
+const PLACEHOLDER_WALLET = '0x0000000000000000000000000000000000000000'
+
+function isConfiguredWallet(a: string): boolean {
+  const t = a.trim()
+  if (!t) return false
+  return t.toLowerCase() !== PLACEHOLDER_WALLET.toLowerCase()
+}
+
+function isHttpUrl(s: string): boolean {
+  return /^https?:\/\/.+/i.test(s.trim())
+}
+
 export function DepositViewQrPage() {
   const { firebaseUid } = useAuthState()
-  const { settings } = useSiteSettings()
+  const { settings, loaded: settingsLoaded } = useSiteSettings()
   const [rows, setRows] = useState<DepositRow[]>([])
   const [loading, setLoading] = useState(true)
   const [qrFor, setQrFor] = useState<DepositRow | null>(null)
@@ -73,7 +84,10 @@ export function DepositViewQrPage() {
     return () => unsub()
   }, [firebaseUid])
 
-  const address = useMemo(() => settings.depositWalletAddress, [settings.depositWalletAddress])
+  const address = useMemo(() => settings.depositWalletAddress?.trim() ?? '', [settings.depositWalletAddress])
+  const qrUrl = useMemo(() => settings.qrCodeUrl?.trim() ?? '', [settings.qrCodeUrl])
+  const hasWallet = isConfiguredWallet(address)
+  const hasQrImage = Boolean(qrUrl && isHttpUrl(qrUrl))
 
   return (
     <main>
@@ -117,20 +131,23 @@ export function DepositViewQrPage() {
                             <td>{fmtDateTime(r.createdAtMs)}</td>
                             <td className="font-monospace text-nowrap">{paymentIdFromDocId(r.id)}</td>
                             <td>{r.amount}</td>
-                            <td className="text-break" style={{ maxWidth: '220px', fontSize: '0.85rem' }}>
-                              {address}
+                            <td>
+                              <button
+                                type="button"
+                                className="btn btn-link p-0 text-primary text-decoration-underline"
+                                onClick={() => setQrFor(r)}
+                              >
+                                Address
+                              </button>
                             </td>
                             <td>
-                              <a
-                                href="#view-qr"
-                                className="text-primary"
-                                onClick={(e) => {
-                                  e.preventDefault()
-                                  setQrFor(r)
-                                }}
+                              <button
+                                type="button"
+                                className="btn btn-link p-0 text-primary text-decoration-underline"
+                                onClick={() => setQrFor(r)}
                               >
-                                View
-                              </a>
+                                View QR
+                              </button>
                             </td>
                           </tr>
                         ))
@@ -162,23 +179,47 @@ export function DepositViewQrPage() {
                 <button type="button" className="btn-close btn-close-white" aria-label="Close" onClick={() => setQrFor(null)} />
               </div>
               <div className="modal-body text-center">
-                <p className="small text-secondary mb-2">
-                  {settings.depositNetwork} · {qrFor.amount} USDT
+                <p className="small text-secondary mb-3">
+                  {settings.depositNetwork} · Invoice {qrFor.amount} {settings.currencyLabel ?? 'USDT'}
                 </p>
-                <div className="d-inline-block rounded-3 bg-white p-4">
-                  <QRCodeSVG value={address} size={240} level="H" />
-                </div>
-                <p className="mt-3 mb-1 small text-break font-monospace">{address}</p>
-                <button
-                  type="button"
-                  className="btn btn-primary mt-2"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(address)
-                    toast.success('Address copied')
-                  }}
-                >
-                  Copy address
-                </button>
+                {!settingsLoaded ? (
+                  <p className="small text-secondary">Loading deposit settings…</p>
+                ) : hasQrImage ? (
+                  <div className="d-inline-block rounded-3 border border-secondary bg-white p-3">
+                    <img
+                      src={qrUrl}
+                      alt="Deposit QR code"
+                      className="mx-auto d-block"
+                      style={{ maxWidth: 280, maxHeight: 280, width: '100%', height: 'auto' }}
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                ) : (
+                  <div className="alert alert-warning text-start small" role="status">
+                    No QR image published yet. An administrator must upload one under <strong>Admin → QR &amp; Deposit</strong>.
+                  </div>
+                )}
+                {hasWallet ? (
+                  <>
+                    <p className="mt-3 mb-2 small text-secondary text-start">Treasury wallet (copy exactly)</p>
+                    <p className="mb-3 small text-break font-monospace text-start px-2">{address}</p>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(address)
+                        toast.success('Address copied')
+                      }}
+                    >
+                      Copy address
+                    </button>
+                  </>
+                ) : (
+                  <p className="mt-3 small text-warning">
+                    Deposit wallet address is not configured yet. Ask your administrator to set the treasury address in{' '}
+                    <strong>Admin → QR &amp; Deposit</strong>.
+                  </p>
+                )}
               </div>
             </div>
           </div>

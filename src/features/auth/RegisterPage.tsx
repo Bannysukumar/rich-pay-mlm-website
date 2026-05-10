@@ -1,14 +1,15 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { signInWithEmailAndPassword } from 'firebase/auth'
+import { indexedDBLocalPersistence, setPersistence, signInWithEmailAndPassword } from 'firebase/auth'
 import { motion } from 'framer-motion'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { z } from 'zod'
 import { PublicNavbar } from '@/features/landing/PublicNavbar'
 import '@/features/landing/landing.css'
-import { registerWithProfile } from '@/lib/api/authCallables'
+import { useAuthState } from '@/hooks/useAuth'
+import { publicResolveReferrerCallable, registerWithProfile } from '@/lib/api/authCallables'
 import { auth } from '@/lib/firebase'
 
 const schema = z
@@ -37,8 +38,11 @@ function makeReferenceId(): string {
 
 export function RegisterPage() {
   const navigate = useNavigate()
+  const { firebaseUid, profileLoaded, profile } = useAuthState()
   const [params] = useSearchParams()
   const refFromUrl = params.get('ref')
+  const [referrerStatus, setReferrerStatus] = useState<'idle' | 'checking' | 'ok' | 'notfound' | 'error'>('idle')
+  const [referrerName, setReferrerName] = useState('')
 
   useEffect(() => {
     document.title = 'Account Registration | Join RichPay Platform'
@@ -48,17 +52,49 @@ export function RegisterPage() {
     register,
     handleSubmit,
     setValue,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<Form>({
     resolver: zodResolver(schema),
     defaultValues: { terms: false, sponsor: '' },
   })
 
+  const sponsorInput = watch('sponsor') ?? ''
+
   useEffect(() => {
     if (refFromUrl) {
-      setValue('sponsor', refFromUrl)
+      setValue('sponsor', refFromUrl.trim())
     }
   }, [refFromUrl, setValue])
+
+  useEffect(() => {
+    const id = sponsorInput.trim()
+    if (!id) {
+      setReferrerStatus('idle')
+      setReferrerName('')
+      return
+    }
+    setReferrerStatus('checking')
+    setReferrerName('')
+    const t = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await publicResolveReferrerCallable(id)
+          if (res.found && res.fullName) {
+            setReferrerStatus('ok')
+            setReferrerName(res.fullName)
+          } else {
+            setReferrerStatus('notfound')
+            setReferrerName('')
+          }
+        } catch {
+          setReferrerStatus('error')
+          setReferrerName('')
+        }
+      })()
+    }, 350)
+    return () => window.clearTimeout(t)
+  }, [sponsorInput])
 
   const onSubmit = async (data: Form) => {
     try {
@@ -71,6 +107,7 @@ export function RegisterPage() {
         sponsorUsername: sponsor,
         termsAccepted: true,
       })
+      await setPersistence(auth, indexedDBLocalPersistence)
       await signInWithEmailAndPassword(auth, data.email.trim(), data.password)
       toast.success('Portfolio initialized')
       navigate('/register/success', {
@@ -87,6 +124,24 @@ export function RegisterPage() {
       const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: string }).message) : ''
       toast.error(msg || 'Registration failed — deploy Cloud Functions and check Firebase config')
     }
+  }
+
+  if (!profileLoaded) {
+    return (
+      <div className="landing-root auth-page-shell auth-register-shell">
+        <div className="flex min-h-svh items-center justify-center bg-rich-black text-zinc-500">
+          Restoring session…
+        </div>
+      </div>
+    )
+  }
+
+  if (firebaseUid && profile?.blocked) {
+    return <Navigate to="/login" replace state={{ blocked: true }} />
+  }
+
+  if (firebaseUid) {
+    return <Navigate to="/dashboard" replace />
   }
 
   return (
@@ -162,15 +217,31 @@ export function RegisterPage() {
                 {errors.mobile ? <p className="auth-field-error">{errors.mobile.message}</p> : null}
               </div>
               <div className="form-group auth-register-field">
-                <label htmlFor="reg-sponsor">Referral ID </label>
+                <label htmlFor="reg-sponsor">Referral ID</label>
                 <input
                   id="reg-sponsor"
                   type="text"
                   className="form-control"
-                  placeholder="Sponsor ID"
+                  placeholder="Sponsor user ID"
                   readOnly={!!refFromUrl}
+                  autoComplete="off"
                   {...register('sponsor')}
                 />
+                {sponsorInput.trim() ? (
+                  <p className="auth-field-hint auth-referrer-hint" aria-live="polite">
+                    {referrerStatus === 'checking' ? (
+                      <span className="text-muted">Looking up referrer…</span>
+                    ) : referrerStatus === 'ok' ? (
+                      <>
+                        Introducing sponsor: <span className="text-gold font-semibold">{referrerName}</span>
+                      </>
+                    ) : referrerStatus === 'notfound' ? (
+                      <span className="auth-field-error">No member found with this Referral ID.</span>
+                    ) : referrerStatus === 'error' ? (
+                      <span className="auth-field-error">Could not verify referral. Try again or continue if you’re sure.</span>
+                    ) : null}
+                  </p>
+                ) : null}
               </div>
             </div>
 

@@ -1,7 +1,11 @@
 import type { ReactNode } from 'react'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
+import { estimatedTotalRoiPercent, fmtUsdRange, usePublicPackages } from '@/hooks/usePublicPackages'
+import { usePublicRanks, type PublicRankRow } from '@/hooks/usePublicRanks'
+import { usePublicTeamLevels } from '@/hooks/usePublicTeamLevels'
+import { useSiteSettings } from '@/hooks/useSiteSettings'
 import { PublicNavbar } from './PublicNavbar'
 import './landing.css'
 
@@ -19,92 +23,42 @@ function Reveal({ children, className }: { children: ReactNode; className?: stri
   )
 }
 
-const plans = [
-  { name: 'Starter Plan', roi: '1%', price: '$100', duration: '200 Days', returnLabel: 'Total Return: 200%', extraClass: '' },
-  {
-    name: 'Bronze Plan',
-    roi: '2%',
-    price: '$200',
-    duration: '100 Days',
-    returnLabel: 'Total Return: 200%',
-    extraClass: 'plans-card-accent',
-  },
-  { name: 'Silver Plan', roi: '3%', price: '$300', duration: '66 Days', returnLabel: 'Total Return: 200%', extraClass: '' },
-  { name: 'Gold Plan', roi: '4%', price: '$400', duration: '50 Days', returnLabel: 'Total Return: 200%', extraClass: '' },
-  {
-    name: 'Platinum Plan',
-    roi: '5%',
-    price: '$500',
-    duration: '40 Days',
-    returnLabel: 'Total Return: 200%',
-    extraClass: 'plans-card-platinum',
-  },
-]
+const PLAN_CARD_VARIANTS = ['', 'plans-card-accent', '', 'plans-card-platinum', ''] as const
 
-/** Matches reference layout: alternating L / R on the vertical gold line */
-const timeline = [
-  { title: 'Level 1: 10%', desc: 'Condition: Direct referrals' },
-  { title: 'Level 2: 5%', desc: 'Condition: 2+ active directs' },
-  { title: 'Level 3: 3%', desc: 'Condition: Growing team volume' },
-  { title: 'Level 4: 2%', desc: 'Condition: Qualified structure' },
-  { title: 'Level 5: 1%', desc: 'Condition: Rank progression' },
-  { title: 'Level 6: 0.5%', desc: 'Condition: Sustained performance' },
-  { title: 'Level 7–9: 0.5%', desc: 'Deep network rewards' },
-  { title: 'Level 10–15: 0.25%', desc: 'Maximum depth bonus band' },
-]
+function teamLevelSubtitle(row: { requiredDirects: number }): string {
+  const d = row.requiredDirects
+  if (Number.isFinite(d) && d > 0) {
+    return `${d} active direct referral${d === 1 ? '' : 's'}`
+  }
+  return 'As published in admin team matrix'
+}
 
-const ranks = [
-  {
-    title: 'Rank 1',
-    target: '$5,000',
-    reward: '$100 for 10 days',
-    icon: (
+function RankBadgeGraphic({ rank }: { rank: PublicRankRow }) {
+  const url = rank.iconUrl?.trim()
+  if (url && /^https?:\/\/.+/i.test(url)) {
+    return (
+      <img
+        src={url}
+        alt=""
+        className="mx-auto h-14 w-14 rounded-full object-cover"
+        referrerPolicy="no-referrer"
+      />
+    )
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-    ),
-    extra: '',
-  },
-  {
-    title: 'Rank 2',
-    target: '$20,000',
-    reward: '$250 for 15 days',
-    icon: (
-      <>
-        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-        <polyline points="22 4 12 14.01 9 11.01" />
-      </>
-    ),
-    extra: '',
-  },
-  {
-    title: 'Rank 3',
-    target: '$50,000',
-    reward: '$500 for 30 days',
-    icon: (
-      <>
-        <circle cx="12" cy="8" r="7" />
-        <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88" />
-      </>
-    ),
-    extra: '',
-  },
-  {
-    title: 'Rank 4',
-    target: '$100,000',
-    reward: '$1,000 for 45 days',
-    icon: (
-      <>
-        <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
-        <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
-        <path d="M4 22h16" />
-        <path d="M10 14.66V17c0 .55.47.98.97 1.21C12.23 18.78 13.77 18.78 15 18.21c.5-.23.97-.66.97-1.21v-2.34" />
-        <path d="M10 14.66C8.28 14.12 7 12.55 7 10.7V9h10v1.7c0 1.85-1.28 3.42-3 3.96" />
-      </>
-    ),
-    extra: 'milestone-featured',
-  },
-]
+    </svg>
+  )
+}
 
 export function InvestmentPlansPage() {
+  const { packages, loaded: pkLoaded } = usePublicPackages()
+  const { teamLevels, loaded: tlLoaded } = usePublicTeamLevels()
+  const { ranks, loaded: rkLoaded } = usePublicRanks()
+  const { settings, loaded: siteLoaded } = useSiteSettings()
+  const cur = settings.currencyLabel ?? 'USDT'
+
   useEffect(() => {
     const prev = document.title
     document.title = 'Investment Plans & Earnings | RichPay'
@@ -112,6 +66,65 @@ export function InvestmentPlansPage() {
       document.title = prev
     }
   }, [])
+
+  const maxRoiMult = useMemo(() => {
+    if (!packages.length) return null
+    return Math.max(1, ...packages.map((p) => p.maxRoiMultiplier))
+  }, [packages])
+
+  const guidelineCards = useMemo(() => {
+    const items: { h: string; p: ReactNode }[] = [
+      {
+        h: 'Withdrawals',
+        p: (
+          <>
+            Minimum withdrawal: {settings.minWithdrawal} {cur}
+            <br />
+            Withdrawal fee: {settings.withdrawFeePercent}%
+          </>
+        ),
+      },
+      {
+        h: 'Deposits',
+        p: (
+          <>
+            Minimum deposit: {settings.minDeposit} {cur}
+          </>
+        ),
+      },
+    ]
+    if (pkLoaded && packages.length > 0 && maxRoiMult != null) {
+      items.push({
+        h: 'Return caps',
+        p: `Published packages use non-working / return multipliers up to ${maxRoiMult}× (set per package in admin).`,
+      })
+    }
+    const roiOff = settings.roiEnabled === false
+    items.push({
+      h: 'Daily ROI',
+      p: roiOff
+        ? 'Daily accruals are currently disabled by the administrator.'
+        : `Accruals follow platform rules when enabled · UTC process hour: ${settings.roiProcessHourUtc ?? 0}.`,
+    })
+    if (settings.publicPlansGuidelineExtra?.trim()) {
+      items.push({
+        h: 'Additional notes',
+        p: <span className="whitespace-pre-line">{settings.publicPlansGuidelineExtra.trim()}</span>,
+      })
+    }
+    return items
+  }, [
+    cur,
+    maxRoiMult,
+    packages.length,
+    pkLoaded,
+    settings.minDeposit,
+    settings.minWithdrawal,
+    settings.publicPlansGuidelineExtra,
+    settings.roiEnabled,
+    settings.roiProcessHourUtc,
+    settings.withdrawFeePercent,
+  ])
 
   return (
     <div className="landing-root plans-page-shell">
@@ -141,126 +154,164 @@ export function InvestmentPlansPage() {
             Select Your <span className="text-gold">Tier</span>
           </h2>
         </Reveal>
-        <div className="plans-grid plans-grid-five">
-          {plans.map((p) => (
-            <Reveal key={p.name}>
-              <div className={`card glass plans-plan-card text-center ${p.extraClass}`}>
-                <span className="plans-tier-label">{p.name}</span>
-                <div className="roi-large plans-roi-white">{p.roi}</div>
-                <h3 className="plans-tier-price">{p.price}</h3>
-                <p className="plans-tier-meta">Duration: {p.duration}</p>
-                <p className="plans-tier-return">{p.returnLabel}</p>
-              </div>
+        <div className="plans-grid">
+          {!pkLoaded ? (
+            <Reveal>
+              <p className="text-center text-[#aaa]" style={{ gridColumn: '1 / -1' }}>
+                Loading packages…
+              </p>
             </Reveal>
-          ))}
+          ) : packages.length === 0 ? (
+            <Reveal>
+              <p className="text-center text-[#aaa]" style={{ gridColumn: '1 / -1' }}>
+                No investment packages are published yet. Please check back soon or contact support.
+              </p>
+            </Reveal>
+          ) : (
+            packages.map((p, i) => {
+              const roi = p.roiPercent
+              const totalPct = estimatedTotalRoiPercent(p)
+              const variant = PLAN_CARD_VARIANTS[i % PLAN_CARD_VARIANTS.length]
+              return (
+                <Reveal key={p.id}>
+                  <div className={`card glass plans-plan-card text-center ${variant}`}>
+                    <span className="plans-tier-label">{p.name}</span>
+                    <div className="roi-large plans-roi-white">{roi}% Daily</div>
+                    <h3 className="plans-tier-price">{fmtUsdRange(p.minAmount, p.maxAmount)}</h3>
+                    <p className="plans-tier-meta">Duration: {p.durationDays} Days</p>
+                    <p className="plans-tier-return">Total ~{totalPct}%</p>
+                  </div>
+                </Reveal>
+              )
+            })
+          )}
         </div>
       </section>
 
-      <section className="sponsor-income lp-container sponsor-section-pad">
-        <Reveal>
-          <div className="glass sponsor-glass sponsor-panel relative overflow-hidden text-center">
-            <div className="sponsor-blob blob" aria-hidden />
-            <h2 className="section-title plans-styled-title sponsor-title-tight">
-              Direct <span className="text-gold">Sponsor Income</span>
-            </h2>
-            <div className="sponsor-pct pulse">5%</div>
-            <p className="sponsor-copy">
-              Earn instant income on every direct referral investment. When your network grows, your rewards scale
-              immediately.
-            </p>
-            <div className="sponsor-example-pill glass">Example: Earn $500 + Get More Weekly</div>
-          </div>
-        </Reveal>
-      </section>
+      {!siteLoaded ? null : (
+        <section className="sponsor-income lp-container sponsor-section-pad">
+          <Reveal>
+            <div className="glass sponsor-glass sponsor-panel relative overflow-hidden text-center">
+              <div className="sponsor-blob blob" aria-hidden />
+              <h2 className="section-title plans-styled-title sponsor-title-tight">
+                Direct <span className="text-gold">Sponsor Income</span>
+              </h2>
+              <div className="sponsor-pct pulse">{settings.sponsorPercent}%</div>
+              {settings.publicPlansSponsorBody?.trim() ? (
+                <p className="sponsor-copy whitespace-pre-line">{settings.publicPlansSponsorBody.trim()}</p>
+              ) : (
+                <p className="sponsor-copy text-[#cfcfcf]">
+                  Sponsor rate and team-depth limits are configured in admin (current sponsor bonus:{' '}
+                  {settings.sponsorPercent}% · up to {settings.teamLevelsCount} team levels).
+                </p>
+              )}
+              {settings.publicPlansSponsorPill?.trim() ? (
+                <div className="sponsor-example-pill glass">{settings.publicPlansSponsorPill.trim()}</div>
+              ) : null}
+            </div>
+          </Reveal>
+        </section>
+      )}
 
-      <section className="team-income team-section-bg">
-        <div className="lp-container">
+      {tlLoaded && teamLevels.length > 0 ? (
+        <section className="team-income team-section-bg">
+          <div className="lp-container">
+            <Reveal>
+              <h2 className="section-title plans-styled-title">
+                Team Level <span className="text-gold">Growth Path</span>
+              </h2>
+            </Reveal>
+            {settings.publicPlansTeamLead?.trim() ? (
+              <p className="team-section-lead whitespace-pre-line">{settings.publicPlansTeamLead.trim()}</p>
+            ) : null}
+
+            <div className="timeline">
+              {teamLevels.map((t) => (
+                <Reveal key={t.id}>
+                  <div className="timeline-item">
+                    <div className="timeline-dot" />
+                    <div className="timeline-content glass timeline-card">
+                      <h3 className="timeline-heading">
+                        Level {t.level}: {t.percent}%
+                      </h3>
+                      <p className="timeline-desc">{teamLevelSubtitle(t)}</p>
+                    </div>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : tlLoaded ? null : (
+        <section className="team-income team-section-bg">
+          <div className="lp-container py-12 text-center text-[#888]">
+            Loading team rewards…
+          </div>
+        </section>
+      )}
+
+      {rkLoaded && ranks.length > 0 ? (
+        <section className="rank-rewards lp-container rank-section-pad">
           <Reveal>
             <h2 className="section-title plans-styled-title">
-              Team Level <span className="text-gold">Growth Path</span>
+              Rank Achievement <span className="text-gold">Milestones</span>
             </h2>
           </Reveal>
-          <p className="team-section-lead">Earn deep generational commissions across every qualified level.</p>
-
-          <div className="timeline">
-            {timeline.map((t) => (
-              <Reveal key={t.title}>
-                <div className="timeline-item">
-                  <div className="timeline-dot" />
-                  <div className="timeline-content glass timeline-card">
-                    <h3 className="timeline-heading">{t.title}</h3>
-                    <p className="timeline-desc">{t.desc}</p>
+          <div className="roadmap">
+            {ranks.map((r, i) => (
+              <Reveal key={r.id}>
+                <div
+                  className={`milestone glass milestone-card ${
+                    i === ranks.length - 1 && ranks.length >= 2 ? 'milestone-featured' : ''
+                  }`}
+                >
+                  <div className={`rank-badge ${i === ranks.length - 1 && ranks.length >= 2 ? 'rank-badge-lg' : ''}`}>
+                    <RankBadgeGraphic rank={r} />
                   </div>
+                  <h4 className="milestone-rank-title">{r.name}</h4>
+                  <p className="milestone-target">
+                    Target team business: {new Intl.NumberFormat(undefined).format(r.requiredTeamBusiness)} {cur}
+                  </p>
+                  <p className="milestone-reward">
+                    Reward:{' '}
+                    <span className="text-gold font-semibold">
+                      {new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(r.dailyReward)}{' '}
+                      {cur}/day · {r.rewardDurationDays} days
+                    </span>
+                  </p>
                 </div>
               </Reveal>
             ))}
           </div>
-        </div>
-      </section>
+          {settings.publicPlansRankFootnote?.trim() ? (
+            <p className="rank-footnote whitespace-pre-line">{settings.publicPlansRankFootnote.trim()}</p>
+          ) : null}
+        </section>
+      ) : rkLoaded ? null : (
+        <section className="rank-rewards lp-container rank-section-pad py-12 text-center text-[#888]">
+          Loading rank milestones…
+        </section>
+      )}
 
-      <section className="rank-rewards lp-container rank-section-pad">
-        <Reveal>
-          <h2 className="section-title plans-styled-title">
-            Rank Achievement <span className="text-gold">Milestones</span>
-          </h2>
-        </Reveal>
-        <div className="roadmap">
-          {ranks.map((r) => (
-            <Reveal key={r.title}>
-              <div className={`milestone glass milestone-card ${r.extra}`}>
-                <div className={`rank-badge ${r.extra ? 'rank-badge-lg' : ''}`}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    {r.icon}
-                  </svg>
+      {!siteLoaded ? null : (
+        <section className="rules lp-container rules-section-pad">
+          <Reveal>
+            <h2 className="section-title plans-styled-title">
+              Platform <span className="text-gold">Guidelines</span>
+            </h2>
+          </Reveal>
+          <div className="guidelines-grid">
+            {guidelineCards.map((x) => (
+              <Reveal key={x.h}>
+                <div className="card glass guideline-card">
+                  <h4 className="guideline-card-title">{x.h}</h4>
+                  <p className="guideline-card-body">{x.p}</p>
                 </div>
-                <h4 className="milestone-rank-title">{r.title}</h4>
-                <p className="milestone-target">Target: {r.target}</p>
-                <p className="milestone-reward">
-                  Reward: <span className="text-gold font-semibold">{r.reward}</span>
-                </p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-        <p className="rank-footnote">…And higher tiers up to Rank 7 ($1,000/Day)</p>
-      </section>
-
-      <section className="rules lp-container rules-section-pad">
-        <Reveal>
-          <h2 className="section-title plans-styled-title">
-            Platform <span className="text-gold">Guidelines</span>
-          </h2>
-        </Reveal>
-        <div className="guidelines-grid">
-          {[
-            {
-              h: 'Withdrawal Process',
-              p: (
-                <>
-                  Minimum withdrawal: $10
-                  <br />
-                  Withdrawal fee: 10%
-                </>
-              ),
-            },
-            {
-              h: 'Earning Caps',
-              p: 'Maximum earning is capped at 2× your active investment.',
-            },
-            {
-              h: 'Daily ROI',
-              p: 'ROI is credited to your wallet balance daily at market close.',
-            },
-          ].map((x) => (
-            <Reveal key={x.h}>
-              <div className="card glass guideline-card">
-                <h4 className="guideline-card-title">{x.h}</h4>
-                <p className="guideline-card-body">{x.p}</p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-      </section>
+              </Reveal>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="cta plans-cta-section text-center">
         <Reveal>

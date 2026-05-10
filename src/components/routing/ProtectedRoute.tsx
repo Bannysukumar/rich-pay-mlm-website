@@ -24,6 +24,10 @@ export function ProtectedRoute({
     return <Navigate to="/login" replace state={{ from: loc.pathname }} />
   }
 
+  if (profile?.blocked && !adminOnly) {
+    return <Navigate to="/login" replace state={{ blocked: true }} />
+  }
+
   if (adminOnly && profile?.role !== 'admin') {
     return <Navigate to="/dashboard" replace />
   }

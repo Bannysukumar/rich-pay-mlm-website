@@ -23,6 +23,10 @@
         "function": { "functionName": "registerWithProfile", "region": "us-central1" }
       },
       {
+        "source": "/api/call/publicResolveReferrer",
+        "function": { "functionName": "publicResolveReferrer", "region": "us-central1" }
+      },
+      {
         "source": "/api/call/updateMemberProfile",
         "function": { "functionName": "updateMemberProfile", "region": "us-central1" }
       },
@@ -61,6 +65,18 @@
       {
         "source": "/api/call/listDirectReferrals",
         "function": { "functionName": "listDirectReferrals", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/adminWithdrawalUpdate",
+        "function": { "functionName": "adminWithdrawalUpdate", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/adminFinalizeDeposit",
+        "function": { "functionName": "adminFinalizeDeposit", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/adminBroadcastNotification",
+        "function": { "functionName": "adminBroadcastNotification", "region": "us-central1" }
       },
       {
         "source": "**",

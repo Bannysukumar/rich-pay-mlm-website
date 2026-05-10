@@ -1,8 +1,10 @@
 import type { FormEvent, ReactNode } from 'react'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { formatTelegramLabel, telegramChannelHref } from '@/lib/contactDisplay'
+import { useSiteSettings } from '@/hooks/useSiteSettings'
 import { PublicNavbar } from './PublicNavbar'
 import './landing.css'
 
@@ -20,14 +22,103 @@ function Reveal({ children, className }: { children: ReactNode; className?: stri
   )
 }
 
+type ContactCard = {
+  key: string
+  icon: ReactNode
+  title: string
+  body: ReactNode
+}
+
 export function ContactPage() {
+  const { settings, loaded } = useSiteSettings()
+
   useEffect(() => {
     document.title = 'Contact Us | RichPay Institutional Support'
   }, [])
 
+  const cards = useMemo(() => {
+    const list: ContactCard[] = []
+    const email = settings.supportEmail?.trim()
+    const telegramRaw = settings.socialTelegram?.trim()
+    const response = settings.publicContactResponseTime?.trim()
+
+    if (email) {
+      list.push({
+        key: 'email',
+        icon: (
+          <>
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+            <polyline points="22,6 12,13 2,6" />
+          </>
+        ),
+        title: 'Email Support',
+        body: (
+          <a href={`mailto:${email}`} className="contact-channel-link contact-card-meta">
+            {email}
+          </a>
+        ),
+      })
+    }
+
+    if (telegramRaw) {
+      const label = formatTelegramLabel(telegramRaw)
+      const href = telegramChannelHref(telegramRaw)
+      list.push({
+        key: 'telegram',
+        icon: (
+          <path d="M21.19 7L12 11.6L2.81 7M12 11.6V21M21.19 7L12 2.4L2.81 7M21.19 7V17L12 21.6M2.81 7V17L12 21.6" />
+        ),
+        title: 'Telegram Hub',
+        body:
+          href === '#' ? (
+            <span className="contact-card-meta">{label}</span>
+          ) : (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="contact-channel-link contact-card-meta"
+            >
+              {label}
+            </a>
+          ),
+      })
+    }
+
+    if (response) {
+      list.push({
+        key: 'response',
+        icon: (
+          <>
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </>
+        ),
+        title: 'Response Time',
+        body: <span className="contact-card-meta whitespace-pre-line">{response}</span>,
+      })
+    }
+
+    return list
+  }, [
+    settings.publicContactResponseTime,
+    settings.socialTelegram,
+    settings.supportEmail,
+  ])
+
+  const heroSub =
+    settings.publicContactHeroSub?.trim() ||
+    'Reach our team using the official channels configured for this platform.'
+  const footerNote = settings.publicContactFooterNote?.trim()
+
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    toast.success('Message received. Our team will respond within 2–4 hours.')
+    const rt = settings.publicContactResponseTime?.trim()
+    toast.success(
+      rt
+        ? `Message received. Target response window: ${rt}`
+        : 'Message received — our team will reply as soon as possible.',
+    )
     e.currentTarget.reset()
   }
 
@@ -46,50 +137,39 @@ export function ContactPage() {
             </h1>
           </Reveal>
           <Reveal>
-            <p className="contact-hero-sub">
-              Our specialized team is available 24/7 to assist with your institutional trading and investment queries.
-            </p>
+            <p className="contact-hero-sub whitespace-pre-line">{heroSub}</p>
           </Reveal>
         </div>
       </header>
 
       <section className="lp-container contact-cards-section">
-        <div className="contact-grid-3">
-          <Reveal>
-            <div className="card glass text-center contact-info-card">
-              <div className="contact-rank-badge" aria-hidden>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                  <polyline points="22,6 12,13 2,6" />
-                </svg>
-              </div>
-              <h3 className="text-gold">Email Support</h3>
-              <p className="contact-card-meta">support@richpay.com</p>
-            </div>
-          </Reveal>
-          <Reveal>
-            <div className="card glass text-center contact-info-card">
-              <div className="contact-rank-badge" aria-hidden>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21.19 7L12 11.6L2.81 7M12 11.6V21M21.19 7L12 2.4L2.81 7M21.19 7V17L12 21.6M2.81 7V17L12 21.6" />
-                </svg>
-              </div>
-              <h3 className="text-gold">Telegram Hub</h3>
-              <p className="contact-card-meta">@RichPayOfficial</p>
-            </div>
-          </Reveal>
-          <Reveal>
-            <div className="card glass text-center contact-info-card">
-              <div className="contact-rank-badge" aria-hidden>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
-                </svg>
-              </div>
-              <h3 className="text-gold">Response Time</h3>
-              <p className="contact-card-meta">Within 2-4 Hours</p>
-            </div>
-          </Reveal>
+        <div className="contact-grid-adaptive">
+          {!loaded ? (
+            <Reveal>
+              <p className="contact-card-meta text-center opacity-80">Loading support channels…</p>
+            </Reveal>
+          ) : cards.length === 0 ? (
+            <Reveal>
+              <p className="contact-card-meta text-center opacity-80">
+                No public support channels yet. An administrator can add support email, Telegram, and response time in
+                site configuration.
+              </p>
+            </Reveal>
+          ) : (
+            cards.map((c) => (
+              <Reveal key={c.key}>
+                <div className="card glass text-center contact-info-card">
+                  <div className="contact-rank-badge" aria-hidden>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      {c.icon}
+                    </svg>
+                  </div>
+                  <h3 className="text-gold">{c.title}</h3>
+                  {c.body}
+                </div>
+              </Reveal>
+            ))
+          )}
         </div>
       </section>
 
@@ -197,13 +277,12 @@ export function ContactPage() {
               </li>
             </ul>
           </div>
-          <div>
-            <h4 className="contact-footer-col-title">Official Info</h4>
-            <p className="contact-footer-info">
-              RichPay Support Center is active 24/5 during market hours. Weekend support remains standby for urgent
-              institutional queries.
-            </p>
-          </div>
+          {footerNote ? (
+            <div>
+              <h4 className="contact-footer-col-title">Official Info</h4>
+              <p className="contact-footer-info whitespace-pre-line">{footerNote}</p>
+            </div>
+          ) : null}
         </div>
         <div className="contact-footer-copy">
           © {new Date().getFullYear()} RichPay International. Secure Asset Management.

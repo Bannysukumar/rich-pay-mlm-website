@@ -1,10 +1,13 @@
-import { useMemo } from 'react'
+import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore'
+import { useEffect, useMemo, useState } from 'react'
 import { FaWhatsapp } from 'react-icons/fa'
 import { Link } from 'react-router-dom'
 import { CopySimple, Link as LinkIcon } from '@phosphor-icons/react'
 import toast from 'react-hot-toast'
 import { useAuthState } from '@/hooks/useAuth'
 import { useSiteSettings } from '@/hooks/useSiteSettings'
+import { COLLECTIONS } from '@/lib/constants'
+import { db } from '@/lib/firebase'
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
@@ -22,14 +25,44 @@ function referralBase(): string {
 }
 
 export function DashboardHome() {
-  const { profile } = useAuthState()
+  const { profile, firebaseUid } = useAuthState()
   const { settings } = useSiteSettings()
+  const [activePackageTotal, setActivePackageTotal] = useState<number | undefined>(undefined)
 
   const refLink = useMemo(() => {
     if (!profile?.username) return ''
     const base = referralBase()
     return `${base}/register?ref=${profile.username}`
   }, [profile?.username])
+
+  useEffect(() => {
+    if (!firebaseUid) {
+      setActivePackageTotal(undefined)
+      return
+    }
+    const q = query(
+      collection(db, COLLECTIONS.activePackages),
+      where('userId', '==', firebaseUid),
+      orderBy('startedAt', 'desc'),
+    )
+    return onSnapshot(
+      q,
+      (snap) => {
+        let sum = 0
+        snap.forEach((doc) => {
+          const d = doc.data()
+          if (String(d.status ?? 'active').toLowerCase() === 'active') {
+            sum += Number(d.amount ?? 0)
+          }
+        })
+        setActivePackageTotal(sum)
+      },
+      () => {
+        setActivePackageTotal(0)
+        toast.error('Could not load active package total')
+      },
+    )
+  }, [firebaseUid])
 
   const copy = async () => {
     if (!refLink) return
@@ -47,7 +80,7 @@ export function DashboardHome() {
       `----------------------------------------\n` +
       `-> Up to 5% Daily ROI on investments\n` +
       `-> 30-Level Referral Commission system\n` +
-      `-> Rank Bonuses up to $1000/day\n` +
+      `-> Rank bonuses for qualified ranks\n` +
       `-> 5% Instant Sponsor Reward\n\n` +
       `----------------------------------------\n` +
       `SIGN UP USING MY REFERRAL LINK:\n` +
@@ -73,7 +106,11 @@ export function DashboardHome() {
 
   type Stat = { label: string; value: string; tone: 'warning' | 'primary' | 'danger' | 'success' }
   const row1: Stat[] = [
-    { label: 'Your Package', value: '$ —', tone: 'warning' },
+    {
+      label: 'Your Package (active)',
+      value: activePackageTotal === undefined ? '$ …' : `$ ${fmt(activePackageTotal)}`,
+      tone: 'warning',
+    },
     { label: 'Cash Wallet', value: `$ ${fmt(profile.wallets.cash)}`, tone: 'primary' },
     { label: 'Activation Wallet', value: `$ ${fmt(profile.wallets.activation)}`, tone: 'danger' },
     { label: 'Deposit Wallet', value: `$ ${fmt(profile.wallets.deposit)}`, tone: 'danger' },
@@ -201,7 +238,7 @@ export function DashboardHome() {
                     <small style={{ color: '#aaa' }}>Team Levels</small>
                   </div>
                   <div className="col-4">
-                    <div className="stat-number">$1k/Day</div>
+                    <div className="stat-number">By rank</div>
                     <small style={{ color: '#aaa' }}>Rank Bonus</small>
                   </div>
                 </div>

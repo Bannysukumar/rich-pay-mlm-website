@@ -5,8 +5,15 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Custom claim admin OR Firestore profile role (client session uses profile.role).
+    function profileIsAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
     function isAdmin() {
-      return isSignedIn() && request.auth.token.admin == true;
+      return isSignedIn() && (request.auth.token.admin == true || profileIsAdmin());
     }
 
     function isOwner(uid) {
@@ -16,7 +23,9 @@ service cloud.firestore {
     // --- Users ---
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
-      allow write: if false;
+      allow create, delete: if false;
+      // Members update profiles via Callable only; admins may manage member records here.
+      allow update: if isAdmin();
     }
 
     match /usersByUsername/{username} {
@@ -48,19 +57,19 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // --- Packages (read for members, admin writes) ---
+    // --- Packages (public may read active tiers for marketing pages; admins see all.) ---
     match /packages/{id} {
-      allow read: if isSignedIn();
+      allow read: if isAdmin() || resource.data.active == true;
       allow write: if isAdmin();
     }
 
     match /teamLevels/{id} {
-      allow read: if isSignedIn();
+      allow read: if isAdmin() || resource.data.active == true;
       allow write: if isAdmin();
     }
 
     match /ranks/{id} {
-      allow read: if isSignedIn();
+      allow read: if isAdmin() || resource.data.active == true;
       allow write: if isAdmin();
     }
 

@@ -15,6 +15,8 @@ export interface UserProfile {
   sponsorUsername: string | null
   sponsorUid: string | null
   role: UserRole
+  /** When true member routes should bounce to login unless cleared by admin */
+  blocked?: boolean
   wallets: UserWallets
   totalWithdrawn: number
   activeDirects: number
@@ -68,7 +70,7 @@ export interface DepositRequest {
   adminNote?: string
 }
 
-export type WithdrawStatus = 'pending' | 'approved' | 'rejected' | 'paid'
+export type WithdrawStatus = 'pending' | 'processing' | 'approved' | 'rejected' | 'paid'
 
 export interface WithdrawRequest {
   id: string
@@ -90,6 +92,8 @@ export interface PackageDef {
   roiPercent: number
   durationDays: number
   active: boolean
+  /** Lower sorts first when listing packages for members (admin-managed). */
+  sortOrder?: number
 }
 
 export interface ActivePackage {
@@ -108,13 +112,43 @@ export interface ActivePackage {
 
 export interface SiteSettings {
   maintenanceMode: boolean
+  siteName?: string
+  currencyLabel?: string
+  timezone?: string
+  supportEmail?: string
+  supportWhatsapp?: string
+  logoUrl?: string
+  faviconUrl?: string
+  socialTelegram?: string
+  socialTwitter?: string
   depositWalletAddress: string
   depositNetwork: string
+  depositInstructions?: string
   minDeposit: number
   minWithdrawal: number
   withdrawFeePercent: number
   sponsorPercent: number
   teamLevelsCount: number
+  /** Global ROI cron / accruals flag (cron still needed server-side). */
+  roiEnabled?: boolean
+  roiProcessHourUtc?: number
   qrCodeUrl?: string
   tickerSymbols?: string[]
+  /** Transfer / conversion guardrails surfaced in dashboards. */
+  allowPeerActivationTransfer?: boolean
+  allowIncomeToActivation?: boolean
+  internalTransferFeePercent?: number
+  minActivationTransfer?: number
+  /** Optional marketing copy for public `/plans` (plain text). */
+  publicPlansSponsorBody?: string
+  publicPlansSponsorPill?: string
+  publicPlansTeamLead?: string
+  publicPlansRankFootnote?: string
+  publicPlansGuidelineExtra?: string
+  /** Public `/contact`: SLA line (e.g. "Within 2–4 hours"). */
+  publicContactResponseTime?: string
+  /** Optional hero subtitle on `/contact`. */
+  publicContactHeroSub?: string
+  /** Optional footer blurb column on `/contact`. */
+  publicContactFooterNote?: string
 }

@@ -6,8 +6,9 @@ import { functions } from '@/lib/firebase'
  *
  * - **Non-loopback hosts (production, preview, richpay.live):** always
  *   `${origin}/api/call/:name}` (Hosting rewrites or Vite preview middleware).
- * - **localhost / 127.0.0.1:** use the Vite proxy when `VITE_USE_FUNCTIONS_PROXY=true`;
- *   otherwise call regional `cloudfunctions.net` directly (see `vite.config.ts`).
+ * - **localhost / 127.0.0.1:** use the Vite `/api/call/*` middleware by default (always enabled in
+ *   `vite.config.ts`). Set `VITE_USE_FUNCTIONS_PROXY=false` only if you intentionally want the
+ *   regional `cloudfunctions.net` URL instead.
  *
  * Set `VITE_FUNCTIONS_SAME_ORIGIN=false` to force the default regional `cloudfunctions.net` URL
  * (only if you have fixed CORS / invoker for that origin).
@@ -26,7 +27,7 @@ function useSameOriginCallableUrl(): boolean {
   // Production sites must never rely on DEV flags: some builds ship with MODE=development
   // on a real domain, which wrongly skipped same-origin before.
   if (isLoopback) {
-    return import.meta.env.VITE_USE_FUNCTIONS_PROXY === 'true'
+    return import.meta.env.VITE_USE_FUNCTIONS_PROXY !== 'false'
   }
 
   return true

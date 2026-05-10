@@ -9,10 +9,11 @@ import { COLLECTIONS } from '@/lib/constants'
 import type { UserProfile } from '@/types/models'
 
 function mapUserDoc(uid: string, data: Record<string, unknown>): UserProfile {
-  const w = (data.wallets as UserProfile['wallets']) || {
-    deposit: 0,
-    activation: 0,
-    cash: 0,
+  const raw = data.wallets as Record<string, unknown> | null | undefined
+  const w: UserProfile['wallets'] = {
+    deposit: Number(raw?.deposit ?? 0),
+    activation: Number(raw?.activation ?? 0),
+    cash: Number(raw?.cash ?? 0),
   }
   return {
     uid,
@@ -23,6 +24,7 @@ function mapUserDoc(uid: string, data: Record<string, unknown>): UserProfile {
     sponsorUsername: data.sponsorUsername != null ? String(data.sponsorUsername) : null,
     sponsorUid: data.sponsorUid != null ? String(data.sponsorUid) : null,
     role: (data.role as UserProfile['role']) || 'user',
+    blocked: Boolean(data.blocked),
     wallets: w,
     totalWithdrawn: Number(data.totalWithdrawn ?? 0),
     activeDirects: Number(data.activeDirects ?? 0),
@@ -47,21 +49,44 @@ export function useAuthBootstrap() {
 
   useEffect(() => {
     let unsubProfile: (() => void) | undefined
+    let unsubAuth: (() => void) | undefined
+    let cancelled = false
 
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      unsubProfile?.()
-      unsubProfile = undefined
+    /** Wait for IndexedDB / local persistence restore so we don’t flash logged-out on cold load. */
+    void auth.authStateReady().then(() => {
+      if (cancelled) return
+      unsubAuth = onAuthStateChanged(auth, (user) => {
+        unsubProfile?.()
+        unsubProfile = undefined
 
-      if (!user) {
-        dispatch(clearSession())
-        return
-      }
+        if (!user) {
+          dispatch(clearSession())
+          return
+        }
 
-      const ref = doc(db, COLLECTIONS.users, user.uid)
-      unsubProfile = onSnapshot(
-        ref,
-        (snap) => {
-          if (!snap.exists()) {
+        const ref = doc(db, COLLECTIONS.users, user.uid)
+        unsubProfile = onSnapshot(
+          ref,
+          (snap) => {
+            if (!snap.exists()) {
+              dispatch(
+                setSession({
+                  uid: user.uid,
+                  profile: null,
+                  loaded: true,
+                }),
+              )
+              return
+            }
+            dispatch(
+              setSession({
+                uid: user.uid,
+                profile: mapUserDoc(user.uid, snap.data() as Record<string, unknown>),
+                loaded: true,
+              }),
+            )
+          },
+          () => {
             dispatch(
               setSession({
                 uid: user.uid,
@@ -69,30 +94,14 @@ export function useAuthBootstrap() {
                 loaded: true,
               }),
             )
-            return
-          }
-          dispatch(
-            setSession({
-              uid: user.uid,
-              profile: mapUserDoc(user.uid, snap.data() as Record<string, unknown>),
-              loaded: true,
-            }),
-          )
-        },
-        () => {
-          dispatch(
-            setSession({
-              uid: user.uid,
-              profile: null,
-              loaded: true,
-            }),
-          )
-        },
-      )
+          },
+        )
+      })
     })
 
     return () => {
-      unsubAuth()
+      cancelled = true
+      unsubAuth?.()
       unsubProfile?.()
     }
   }, [dispatch])

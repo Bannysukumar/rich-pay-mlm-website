@@ -1,59 +1,150 @@
-import { NavLink } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
+import {
+  IconArrowDownCircle,
+  IconAward,
+  IconBell,
+  IconCash,
+  IconFileText,
+  IconGift,
+  IconHierarchy,
+  IconLayoutDashboard,
+  IconPackage,
+  IconPercentage,
+  IconQrcode,
+  IconReport,
+  IconSeo,
+  IconSettings,
+  IconShieldCheck,
+  IconTicket,
+  IconTool,
+  IconTransfer,
+  IconUsers,
+  IconWallet,
+} from '@tabler/icons-react'
+import type { ComponentType } from 'react'
+import { useAuthState } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils/cn'
 
-const links: { to: string; label: string }[] = [
-  { to: '/admin', label: 'Dashboard Analytics' },
-  { to: '/admin/users', label: 'User Management' },
-  { to: '/admin/deposits', label: 'Deposit Management' },
-  { to: '/admin/withdrawals', label: 'Withdrawal Management' },
-  { to: '/admin/packages', label: 'Package Management' },
-  { to: '/admin/roi', label: 'ROI Settings' },
-  { to: '/admin/sponsor', label: 'Sponsor Bonus' },
-  { to: '/admin/team-levels', label: 'Team Level Settings' },
-  { to: '/admin/ranks', label: 'Rank Bonus Settings' },
-  { to: '/admin/wallets', label: 'Wallet Settings' },
-  { to: '/admin/qr', label: 'QR & Wallet Address' },
-  { to: '/admin/transfers', label: 'Transfer Settings' },
-  { to: '/admin/tickets', label: 'Ticket Management' },
-  { to: '/admin/notifications', label: 'Notifications' },
-  { to: '/admin/cms', label: 'CMS Management' },
-  { to: '/admin/seo', label: 'SEO Settings' },
-  { to: '/admin/site', label: 'Site Settings' },
-  { to: '/admin/reports', label: 'Reports & Exports' },
-  { to: '/admin/audit', label: 'Audit Logs' },
-  { to: '/admin/maintenance', label: 'Maintenance Mode' },
+type NavIcon = ComponentType<{ className?: string; stroke?: number }>
+
+type NavItem = { to: string; label: string; icon: NavIcon; end?: boolean }
+
+const groups: { title: string; items: NavItem[] }[] = [
+  {
+    title: 'Overview',
+    items: [{ to: '/admin', label: 'Dashboard', icon: IconLayoutDashboard, end: true }],
+  },
+  {
+    title: 'Members & treasury',
+    items: [
+      { to: '/admin/users', label: 'Users', icon: IconUsers },
+      { to: '/admin/deposits', label: 'Deposits', icon: IconCash },
+      { to: '/admin/withdrawals', label: 'Withdrawals', icon: IconArrowDownCircle },
+      { to: '/admin/packages', label: 'Packages', icon: IconPackage },
+    ],
+  },
+  {
+    title: 'Compensation',
+    items: [
+      { to: '/admin/roi', label: 'ROI', icon: IconPercentage },
+      { to: '/admin/sponsor', label: 'Sponsor bonus', icon: IconGift },
+      { to: '/admin/team-levels', label: 'Team levels', icon: IconHierarchy },
+      { to: '/admin/ranks', label: 'Rank bonus', icon: IconAward },
+    ],
+  },
+  {
+    title: 'Operations',
+    items: [
+      { to: '/admin/wallets', label: 'Wallets', icon: IconWallet },
+      { to: '/admin/qr', label: 'QR & address', icon: IconQrcode },
+      { to: '/admin/transfers', label: 'Transfers', icon: IconTransfer },
+      { to: '/admin/tickets', label: 'Tickets', icon: IconTicket },
+      { to: '/admin/notifications', label: 'Notifications', icon: IconBell },
+    ],
+  },
+  {
+    title: 'Content & site',
+    items: [
+      { to: '/admin/cms', label: 'CMS', icon: IconFileText },
+      { to: '/admin/seo', label: 'SEO', icon: IconSeo },
+      { to: '/admin/site', label: 'Site settings', icon: IconSettings },
+    ],
+  },
+  {
+    title: 'Governance',
+    items: [
+      { to: '/admin/reports', label: 'Reports', icon: IconReport },
+      { to: '/admin/audit', label: 'Audit log', icon: IconShieldCheck },
+      { to: '/admin/maintenance', label: 'Maintenance', icon: IconTool },
+    ],
+  },
 ]
 
-export function AdminSidebar() {
+type Props = {
+  onNavigate?: () => void
+  className?: string
+}
+
+export function AdminSidebar({ onNavigate, className }: Props) {
+  const { profile } = useAuthState()
+  const displayName = profile?.fullName?.trim() || profile?.username || 'Administrator'
+  const usernameLine = profile?.username || '—'
+  const initial = displayName.slice(0, 1).toUpperCase()
+
   return (
-    <aside className="flex h-full w-64 flex-col border-r border-red-900/30 bg-[#0c0505]">
-      <div className="border-b border-red-900/40 p-5">
-        <div className="font-display text-sm font-semibold tracking-[0.25em] text-red-500">CONTROL</div>
-        <p className="text-[10px] uppercase tracking-widest text-zinc-600">Administration</p>
+    <aside className={cn('admin-sidebar', className)}>
+      <div className="admin-sidebar-brand">
+        <Link to="/admin" className="admin-brand-lockup" onClick={() => onNavigate?.()}>
+          <img className="admin-brand-seal" src="/assets/images/richpay_sidebar_seal.svg" alt="" width={46} height={46} />
+          <span>
+            <span className="admin-brand-wordmark">Rich Pay</span>
+            <p className="admin-brand-sub">Administration</p>
+          </span>
+        </Link>
       </div>
-      <nav className="flex-1 overflow-y-auto py-3">
-        {links.map((l) => (
-          <NavLink
-            key={l.to}
-            to={l.to}
-            end={l.to === '/admin'}
-            className={({ isActive }) =>
-              cn(
-                'block px-4 py-2 text-xs transition-colors',
-                isActive ? 'bg-red-600/20 text-red-300' : 'text-zinc-500 hover:bg-white/5 hover:text-zinc-300',
-              )
-            }
-          >
-            {l.label}
-          </NavLink>
+
+      <div className="admin-profile-block">
+        <div className="admin-nav-avatar-shell">
+          <div className="admin-nav-avatar" aria-hidden>
+            <span className="admin-nav-avatar-letter">{initial}</span>
+          </div>
+          <span className="admin-nav-online-dot" title="Online" />
+        </div>
+        <div className="min-w-0 flex-1 ps-0.5">
+          <h6 className="admin-nav-display-name truncate">{displayName}</h6>
+          <p className="admin-nav-role">Administrator</p>
+          <p className="admin-nav-meta truncate">{usernameLine}</p>
+        </div>
+      </div>
+
+      <nav className="admin-nav-scroll">
+        {groups.map((g) => (
+          <div key={g.title} className="admin-nav-section">
+            <span className="admin-menu-title">{g.title}</span>
+            <ul className="m-0 list-none p-0">
+              {g.items.map((l) => (
+                <li key={l.to}>
+                  <NavLink
+                    to={l.to}
+                    end={l.end ?? false}
+                    onClick={() => onNavigate?.()}
+                    className={({ isActive }) => cn('admin-nav-link', isActive && 'active')}
+                  >
+                    <l.icon className="admin-nav-ico" stroke={1.5} />
+                    <span className="min-w-0 truncate">{l.label}</span>
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </div>
         ))}
       </nav>
-      <NavLink
-        to="/dashboard"
-        className="border-t border-red-900/40 p-4 text-xs text-zinc-500 hover:text-zinc-300"
-      >
-        ← Member dashboard
-      </NavLink>
+
+      <div className="admin-sidebar-footer">
+        <NavLink to="/dashboard" className="admin-back-member" onClick={() => onNavigate?.()}>
+          ← Member dashboard
+        </NavLink>
+      </div>
     </aside>
   )
 }

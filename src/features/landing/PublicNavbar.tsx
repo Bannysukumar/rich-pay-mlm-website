@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+import { useAuthState } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils/cn'
 
 function Logo() {
@@ -18,6 +19,9 @@ function Logo() {
 export function PublicNavbar({ registerCta = 'Register' }: { registerCta?: string }) {
   const [open, setOpen] = useState(false)
   const { pathname } = useLocation()
+  const { firebaseUid, profileLoaded, profile } = useAuthState()
+  const canEnterDashboard =
+    profileLoaded && Boolean(firebaseUid) && (!profile || !profile.blocked)
 
   return (
     <motion.nav
@@ -54,18 +58,34 @@ export function PublicNavbar({ registerCta = 'Register' }: { registerCta?: strin
           </Link>
         </li>
         <li>
-          <Link
-            to="/login"
-            className={cn((pathname === '/login' || pathname === '/register/success') && 'text-gold')}
-            onClick={() => setOpen(false)}
-          >
-            Login
-          </Link>
+          {canEnterDashboard ? (
+            <Link
+              to="/dashboard"
+              className={cn(pathname.startsWith('/dashboard') && 'text-gold')}
+              onClick={() => setOpen(false)}
+            >
+              Dashboard
+            </Link>
+          ) : (
+            <Link
+              to="/login"
+              className={cn((pathname === '/login' || pathname === '/register/success') && 'text-gold')}
+              onClick={() => setOpen(false)}
+            >
+              Login
+            </Link>
+          )}
         </li>
         <li>
-          <Link to="/register" className="btn-gold" onClick={() => setOpen(false)}>
-            {registerCta}
-          </Link>
+          {canEnterDashboard ? (
+            <Link to="/dashboard/wallet/deposit" className="btn-gold" onClick={() => setOpen(false)}>
+              My wallet
+            </Link>
+          ) : (
+            <Link to="/register" className="btn-gold" onClick={() => setOpen(false)}>
+              {registerCta}
+            </Link>
+          )}
         </li>
       </ul>
       <button

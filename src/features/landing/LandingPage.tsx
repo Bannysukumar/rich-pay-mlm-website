@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { Link } from 'react-router-dom'
+import { estimatedTotalRoiPercent, fmtUsdRange, usePublicPackages } from '@/hooks/usePublicPackages'
 import { PublicNavbar } from './PublicNavbar'
 import './landing.css'
 
@@ -48,22 +49,10 @@ function HeroReveal({
   )
 }
 
-const tiers = [
-  { tier: 'Tier 1', amount: '$100', daily: '1% Daily', days: '200 Days', total: 'Total 200%', border: 'var(--gold-2)' },
-  { tier: 'Tier 2', amount: '$200', daily: '2% Daily', days: '100 Days', total: 'Total 200%', border: 'var(--gold-3)' },
-  { tier: 'Tier 3', amount: '$300', daily: '3% Daily', days: '66 Days', total: 'Total 200%', border: 'var(--gold-4)' },
-  { tier: 'Tier 4', amount: '$400', daily: '4% Daily', days: '50 Days', total: 'Total 200%', border: 'var(--gold-2)' },
-  {
-    tier: 'Tier 5',
-    amount: '$500',
-    daily: '5% Daily',
-    days: '40 Days',
-    total: 'Total 200%',
-    border: '#ffde59',
-  },
-]
+const TIER_BORDERS = ['var(--gold-2)', 'var(--gold-3)', 'var(--gold-4)', 'var(--gold-2)', '#ffde59']
 
 export function LandingPage() {
+  const { packages, loaded } = usePublicPackages()
   const tickerRow = [...tickerPairs, ...tickerPairs]
 
   return (
@@ -212,23 +201,38 @@ export function LandingPage() {
           </h2>
         </Reveal>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          {tiers.map((t) => (
-            <Reveal key={t.tier}>
-              <div
-                className="landing-card p-6 text-center"
-                style={{ borderBottom: `3px solid ${t.border}` }}
-              >
-                <span className="text-[0.9rem] opacity-60">{t.tier}</span>
-                <h3 className="my-2 text-[2rem] font-bold text-white">{t.amount}</h3>
-                <div className="text-gold text-[1.5rem] font-semibold" style={{ WebkitTextFillColor: '#d4af37' }}>
-                  {t.daily}
+          {!loaded ? (
+            <p className="py-12 text-center text-[#aaa]" style={{ gridColumn: '1 / -1' }}>
+              Loading investment tiers…
+            </p>
+          ) : packages.length === 0 ? (
+            <p className="py-12 text-center text-[#aaa]" style={{ gridColumn: '1 / -1' }}>
+              Published packages will appear here after your administrator configures them.
+            </p>
+          ) : (
+            packages.map((p, i) => (
+              <Reveal key={p.id}>
+                <div
+                  className="landing-card p-6 text-center"
+                  style={{
+                    borderBottom: `3px solid ${TIER_BORDERS[i % TIER_BORDERS.length]}`,
+                  }}
+                >
+                  <span className="text-[0.9rem] opacity-60">{p.name}</span>
+                  <h3 className="my-2 text-[2rem] font-bold text-white">{fmtUsdRange(p.minAmount, p.maxAmount)}</h3>
+                  <div
+                    className="text-gold text-[1.5rem] font-semibold"
+                    style={{ WebkitTextFillColor: '#d4af37' }}
+                  >
+                    {p.roiPercent}% Daily
+                  </div>
+                  <p className="mt-4 text-[0.95rem] text-[#aaa]">
+                    {p.durationDays} Days <br /> Total ~{estimatedTotalRoiPercent(p)}%
+                  </p>
                 </div>
-                <p className="mt-4 text-[0.95rem] text-[#aaa]">
-                  {t.days} <br /> {t.total}
-                </p>
-              </div>
-            </Reveal>
-          ))}
+              </Reveal>
+            ))
+          )}
         </div>
         <Reveal className="mt-12 text-center">
           <Link to="/plans" className="btn-outline">
