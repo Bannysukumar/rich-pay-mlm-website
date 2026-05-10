@@ -1,0 +1,28 @@
+export const USERNAME_START = 4448550
+
+export const COLLECTIONS = {
+  users: 'users',
+  usersByUsername: 'usersByUsername',
+  counters: 'counters',
+  packages: 'packages',
+  activePackages: 'activePackages',
+  deposits: 'deposits',
+  topups: 'topups',
+  withdrawals: 'withdrawals',
+  walletTransactions: 'walletTransactions',
+  internalTransfers: 'internalTransfers',
+  dailyProfits: 'dailyProfits',
+  sponsorBonuses: 'sponsorBonuses',
+  teamLevelBonuses: 'teamLevelBonuses',
+  rankBonuses: 'rankBonuses',
+  ranks: 'ranks',
+  teamLevels: 'teamLevels',
+  tickets: 'tickets',
+  ticketReplies: 'ticketReplies',
+  notifications: 'notifications',
+  cmsPages: 'cmsPages',
+  siteSettings: 'siteSettings',
+  seoSettings: 'seoSettings',
+  auditLogs: 'auditLogs',
+  phones: 'phoneIndex',
+} as const

@@ -1,0 +1,475 @@
+/* Ki-admin style dashboard — scoped to avoid bleeding into public landing */
+@import url('https://fonts.googleapis.com/css2?family=Rubik:ital,wght@0,300..900;1,300..900&display=swap');
+
+#ki-dashboard-root {
+  --ki-bg: #0c0c10;
+  --ki-panel: #12121a;
+  --ki-border: rgba(212, 175, 55, 0.15);
+  --ki-gold: #d4af37;
+  --ki-muted: #9898a8;
+  font-family: 'Rubik', system-ui, sans-serif;
+}
+
+#ki-dashboard-root.ltr.dark {
+  background: var(--ki-bg);
+  color: #e4e4e7;
+  min-height: 100vh;
+}
+
+#ki-dashboard-root .ki-app-wrapper {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* Sidebar */
+#ki-dashboard-root .ki-sidebar {
+  width: 278px;
+  flex-shrink: 0;
+  background: var(--ki-panel);
+  border-right: 1px solid var(--ki-border);
+  display: flex;
+  flex-direction: column;
+  z-index: 1040;
+}
+
+@media (max-width: 991.98px) {
+  #ki-dashboard-root .ki-sidebar--desktop {
+    display: none;
+  }
+}
+
+#ki-dashboard-root .ki-app-logo {
+  padding: 1rem 1rem 0.5rem;
+  border-bottom: 1px solid var(--ki-border);
+}
+
+#ki-dashboard-root .ki-logo-img {
+  max-height: 42px;
+  width: auto;
+}
+
+#ki-dashboard-root .ki-nav-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0 1rem;
+}
+
+#ki-dashboard-root .ki-menu-title {
+  display: block;
+  padding: 0.75rem 1.25rem 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6b6b7c;
+}
+
+#ki-dashboard-root .ki-nav-parent {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.55rem 1rem;
+  margin: 0.1rem 0;
+  border: none;
+  background: transparent;
+  color: #c4c4ce;
+  font-size: 0.9rem;
+  text-align: left;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+#ki-dashboard-root .ki-nav-parent:hover,
+#ki-dashboard-root .ki-nav-parent[aria-expanded='true'] {
+  background: rgba(212, 175, 55, 0.08);
+  color: var(--ki-gold);
+}
+
+#ki-dashboard-root .ki-nav-sublink {
+  display: block;
+  padding: 0.45rem 0.75rem 0.45rem 2.5rem;
+  color: #9595a5;
+  font-size: 0.85rem;
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+#ki-dashboard-root .ki-nav-sublink:hover,
+#ki-dashboard-root .ki-nav-sublink.active {
+  color: var(--ki-gold);
+  background: rgba(212, 175, 55, 0.06);
+}
+
+#ki-dashboard-root .ki-nav-single {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 1rem;
+  color: #c4c4ce;
+  text-decoration: none;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+#ki-dashboard-root .ki-nav-single:hover,
+#ki-dashboard-root .ki-nav-single.active {
+  background: rgba(212, 175, 55, 0.08);
+  color: var(--ki-gold);
+}
+
+#ki-dashboard-root .ki-profile-block {
+  padding: 1rem;
+  border-bottom: 1px solid var(--ki-border);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#ki-dashboard-root .ki-avatar-wrap {
+  width: 45px;
+  height: 45px;
+  border-radius: 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #8b2346, #3d1538);
+}
+
+#ki-dashboard-root .ki-app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--ki-bg);
+}
+
+#ki-dashboard-root .ki-header-main {
+  border-bottom: 1px solid var(--ki-border);
+  background: rgba(12, 12, 16, 0.92);
+  backdrop-filter: blur(12px);
+  padding: 0.65rem 0;
+}
+
+#ki-dashboard-root .ki-head-icon {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: #c4c4ce;
+  border: none;
+  cursor: pointer;
+}
+
+#ki-dashboard-root .ki-apps-grid a {
+  text-decoration: none;
+  color: inherit;
+}
+
+#ki-dashboard-root .ki-footer {
+  border-top: 1px solid var(--ki-border);
+  padding: 1rem 0;
+  margin-top: auto;
+  font-size: 0.85rem;
+  color: #6b6b7c;
+}
+
+#ki-dashboard-root .ki-go-top {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(212, 175, 55, 0.2);
+  color: var(--ki-gold);
+  border: 1px solid var(--ki-border);
+  cursor: pointer;
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+#ki-dashboard-root .ki-go-top.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Referral + stat cards (from supplied HTML) */
+#ki-dashboard-root .referral-card {
+  background: linear-gradient(135deg, rgba(20, 20, 30, 0.9), rgba(10, 10, 18, 0.95));
+  border-radius: 24px;
+  border: 1px solid rgba(212, 175, 55, 0.3);
+  overflow: hidden;
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+#ki-dashboard-root .referral-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 15px 40px rgba(212, 175, 55, 0.12);
+}
+
+#ki-dashboard-root .referral-header {
+  background: linear-gradient(135deg, #d4af37, #f9e076);
+  padding: 20px 25px;
+  color: #1a1a2e;
+}
+
+#ki-dashboard-root .referral-header h4 {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1.35rem;
+}
+
+#ki-dashboard-root .referral-body {
+  padding: 28px;
+}
+
+#ki-dashboard-root .referral-link-box {
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 16px;
+  padding: 18px 20px;
+  border: 1px solid rgba(212, 175, 55, 0.2);
+  word-break: break-all;
+}
+
+#ki-dashboard-root .referral-link-box a {
+  color: #f5d96b;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+#ki-dashboard-root .btn-copy-ki {
+  background: linear-gradient(135deg, #2c2c34, #1e1e24);
+  border: 1px solid #d4af37;
+  color: #d4af37;
+  padding: 12px 28px;
+  border-radius: 50px;
+  font-weight: 600;
+  width: 100%;
+  cursor: pointer;
+  transition:
+    transform 0.2s,
+    background 0.2s;
+}
+
+#ki-dashboard-root .btn-copy-ki:hover {
+  background: #d4af37;
+  color: #1a1a2e;
+}
+
+#ki-dashboard-root .btn-whatsapp-ki {
+  background: linear-gradient(135deg, #25d366, #128c7e);
+  border: none;
+  color: #fff;
+  padding: 12px 28px;
+  border-radius: 50px;
+  font-weight: 700;
+  width: 100%;
+  cursor: pointer;
+}
+
+#ki-dashboard-root .stats-mini {
+  background: rgba(212, 175, 55, 0.08);
+  border-radius: 20px;
+  padding: 20px;
+  margin-top: 24px;
+}
+
+#ki-dashboard-root .stat-number {
+  font-size: 1.65rem;
+  font-weight: 800;
+  color: #f5d96b;
+}
+
+/* Referral link page — quick stats + how-it-works */
+#ki-dashboard-root .ki-referral-quick-header {
+  background: linear-gradient(135deg, #1e2a3a, #0f1724) !important;
+  color: #e8e8ef !important;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.2);
+}
+
+#ki-dashboard-root .ki-qr-placeholder {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1.25rem 1.5rem 1rem;
+  border-radius: 20px;
+  border: 1px solid rgba(212, 175, 55, 0.15);
+  max-width: 220px;
+}
+
+#ki-dashboard-root .ki-referral-how-header {
+  background: rgba(212, 175, 55, 0.15) !important;
+  color: #1a1a2e !important;
+}
+
+#ki-dashboard-root .action-buttons .col-md-6 {
+  min-width: 180px;
+}
+
+@media (max-width: 768px) {
+  #ki-dashboard-root .referral-body {
+    padding: 20px;
+  }
+}
+
+/* Eshop-style metric cards */
+#ki-dashboard-root .ki-eshop-card {
+  position: relative;
+  background: var(--ki-panel);
+  border: 1px solid var(--ki-border);
+  border-radius: 16px;
+  padding: 1.25rem 1rem 1.5rem;
+  margin-bottom: 12px;
+  text-align: center;
+  overflow: hidden;
+}
+
+#ki-dashboard-root .ki-eshop-card h3 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin: 0.5rem 0 0.25rem;
+}
+
+#ki-dashboard-root .ki-eshop-card p {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #8a8a9a;
+  text-transform: capitalize;
+}
+
+#ki-dashboard-root .ki-eshop-icon {
+  width: 50px;
+  height: 50px;
+  margin: 0 auto 0.25rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
+}
+
+/* Profile form (Bootstrap + dark) */
+#ki-dashboard-root .ki-profile-card .card-title {
+  font-weight: 600;
+}
+
+#ki-dashboard-root .ki-form-control,
+#ki-dashboard-root .ki-profile-card .form-control {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(212, 175, 55, 0.25);
+  color: #eee;
+  border-radius: 8px;
+  padding: 0.6rem 0.85rem;
+}
+
+#ki-dashboard-root .ki-profile-card .form-control:focus {
+  border-color: rgba(212, 175, 55, 0.55);
+  box-shadow: 0 0 0 0.2rem rgba(212, 175, 55, 0.15);
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+}
+
+#ki-dashboard-root .ki-profile-card .form-control:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+#ki-dashboard-root .ki-profile-card .btn-primary {
+  background: linear-gradient(135deg, #b8922a, #d4af37);
+  border: none;
+  color: #1a1a1e;
+  font-weight: 600;
+}
+
+#ki-dashboard-root .ki-profile-card .btn-primary:hover {
+  filter: brightness(1.05);
+  color: #0a0a0c;
+}
+
+/* Data table (direct referrals) */
+#ki-dashboard-root .ki-direct-table-wrap {
+  overflow-x: auto;
+}
+
+/* View QR — Ki datatable wrapper (matches app template) */
+#ki-dashboard-root .app-datatable-default {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+#ki-dashboard-root select.default-select.form-control.wide {
+  width: 100%;
+}
+
+#ki-dashboard-root .ki-data-table {
+  --ki-table-border: rgba(212, 175, 55, 0.12);
+  color: #e4e4e7;
+}
+
+#ki-dashboard-root .ki-data-table thead tr {
+  border-bottom: 1px solid var(--ki-table-border);
+}
+
+#ki-dashboard-root .ki-data-table thead th {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #a8a8b8;
+  padding: 0.9rem 1rem;
+  white-space: nowrap;
+}
+
+#ki-dashboard-root .ki-data-table tbody td {
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--ki-table-border);
+  vertical-align: middle;
+}
+
+#ki-dashboard-root .ki-data-table tbody tr:hover td {
+  background: rgba(212, 175, 55, 0.05);
+}
+
+#ki-dashboard-root .ki-data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+#ki-dashboard-root .ki-data-table tfoot tr {
+  border-top: 1px solid var(--ki-table-border);
+}
+
+#ki-dashboard-root .ki-data-table tfoot th {
+  padding: 0.65rem 1rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #7a7a8a;
+}
+
+/* Create QR — solid warning alert (matches Ki template) */
+#ki-dashboard-root .alert-warning.solid {
+  background-color: #ffc107;
+  color: #1a1a2e;
+  border: none;
+}
+
+#ki-dashboard-root .alert-warning.solid .btn-close {
+  filter: brightness(0);
+  opacity: 0.55;
+}
+
+#ki-dashboard-root .alert-warning.solid .btn-close:hover {
+  opacity: 1;
+}

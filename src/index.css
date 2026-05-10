@@ -1,0 +1,47 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-display: 'Cinzel', serif;
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+
+  --color-rich-black: #050506;
+  --color-rich-void: #0a0a0c;
+  --color-rich-panel: #0f1014;
+  --color-rich-border: rgba(212, 175, 55, 0.18);
+  --color-rich-gold: #d4af37;
+  --color-rich-gold-dim: #9a7b2c;
+  --color-rich-gold-glow: rgba(212, 175, 55, 0.45);
+  --color-rich-muted: #8a8f9a;
+  --color-rich-danger: #f87171;
+  --color-rich-success: #4ade80;
+}
+
+@layer base {
+  html {
+    @apply scroll-smooth antialiased;
+  }
+  body {
+    @apply m-0 min-h-svh bg-rich-black font-sans text-zinc-200;
+    font-family: var(--font-sans);
+  }
+  #root {
+    @apply min-h-svh w-full max-w-none;
+  }
+  .font-display {
+    font-family: var(--font-display), serif;
+  }
+}
+
+@layer utilities {
+  .text-gradient-gold {
+    @apply bg-gradient-to-r from-[#f5e6a8] via-rich-gold to-[#9a7b2c] bg-clip-text text-transparent;
+  }
+  .glow-border {
+    box-shadow:
+      0 0 0 1px rgba(212, 175, 55, 0.2),
+      0 0 40px -12px rgba(212, 175, 55, 0.35);
+  }
+  .card-glass {
+    @apply rounded-2xl border border-rich-border/60 bg-rich-panel/80 backdrop-blur-xl;
+  }
+}
