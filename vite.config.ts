@@ -198,5 +198,10 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, './src'),
       },
     },
+    // `vite preview` behind Nginx: Host header must be allowed or Vite responds with “Blocked request”.
+    preview: {
+      host: true,
+      allowedHosts: ['richpay.live', 'www.richpay.live', 'localhost', '127.0.0.1'],
+    },
   }
 })
