@@ -1,8 +1,19 @@
 import { createHash } from 'node:crypto'
 import * as admin from 'firebase-admin'
-import { FieldValue, Timestamp, type DocumentSnapshot } from 'firebase-admin/firestore'
+import {
+  FieldPath,
+  FieldValue,
+  Timestamp,
+  type DocumentSnapshot,
+  type QueryDocumentSnapshot,
+} from 'firebase-admin/firestore'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
+import {
+  REFERENCE_COMPOUNDING_PLANS,
+  compoundRoiPercentForDoubleInDays,
+} from './compoundingDefaults'
+import { REFERENCE_RANK_SEED, REFERENCE_TEAM_LEVEL_SEED } from './compensationDefaults'
 
 admin.initializeApp()
 const db = admin.firestore()
@@ -37,6 +48,505 @@ const COL_DEPOSITS = 'deposits'
 const COL_WITHDRAWALS = 'withdrawals'
 const COL_DAILY = 'dailyProfits'
 const COL_INTERNAL = 'internalTransfers'
+const COL_TEAM_LEVELS = 'teamLevels'
+const COL_RANKS = 'ranks'
+
+const REFERENCE_WITHDRAW_PACKAGE_CAPS_SEED = [
+  { packageAmount: 100, maxWithdrawal: 20, usePercentFormula: false, percentOfPackage: 20, active: true, sortOrder: 10 },
+  { packageAmount: 200, maxWithdrawal: 40, usePercentFormula: false, percentOfPackage: 20, active: true, sortOrder: 20 },
+  { packageAmount: 300, maxWithdrawal: 60, usePercentFormula: false, percentOfPackage: 20, active: true, sortOrder: 30 },
+  { packageAmount: 400, maxWithdrawal: 80, usePercentFormula: false, percentOfPackage: 20, active: true, sortOrder: 40 },
+  { packageAmount: 500, maxWithdrawal: 100, usePercentFormula: false, percentOfPackage: 20, active: true, sortOrder: 50 },
+]
+
+function freezeWithdrawPolicyFromSettings(settings: Record<string, unknown>): Record<string, unknown> {
+  return {
+    withdrawPoliciesVersion: Number(settings.withdrawPoliciesVersion ?? 0),
+    withdrawalsEnabled: settings.withdrawalsEnabled !== false,
+    withdrawalRequiresActivePackage: settings.withdrawalRequiresActivePackage !== false,
+    withdrawNetworkLabel: String(settings.withdrawNetworkLabel ?? settings.depositNetwork ?? 'USDT BEP-20'),
+    minWithdrawal: Number(settings.minWithdrawal ?? 10),
+    withdrawFeePercent: Number(settings.withdrawFeePercent ?? 10),
+    withdrawalWindowStart: String(settings.withdrawalWindowStart ?? '10:30'),
+    withdrawalWindowEnd: String(settings.withdrawalWindowEnd ?? '13:30'),
+    withdrawalWindowTimezone: String(settings.withdrawalWindowTimezone ?? 'Etc/UTC'),
+    withdrawalProcessingIntervalHours: Number(settings.withdrawalProcessingIntervalHours ?? 48),
+    withdrawalProcessingMode: String(settings.withdrawalProcessingMode ?? 'manual'),
+    withdrawPackageCaps: Array.isArray(settings.withdrawPackageCaps) ? settings.withdrawPackageCaps : [],
+    defaultWithdrawalPercentOfPackage: Number(settings.defaultWithdrawalPercentOfPackage ?? 20),
+  }
+}
+
+function wallClockMinutes(date: Date, timeZone: string): number | null {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      hour: 'numeric',
+      minute: 'numeric',
+      hour12: false,
+    })
+    const parts = fmt.formatToParts(date)
+    const h = Number(parts.find((p) => p.type === 'hour')?.value ?? NaN)
+    const m = Number(parts.find((p) => p.type === 'minute')?.value ?? NaN)
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return null
+    return h * 60 + m
+  } catch {
+    return null
+  }
+}
+
+function parseHmToMinutes(hm: string): number | null {
+  const x = /^(\d{1,2}):(\d{2})$/.exec(String(hm).trim())
+  if (!x) return null
+  const hh = Number(x[1])
+  const mm = Number(x[2])
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || mm > 59) return null
+  return hh * 60 + mm
+}
+
+/** True if local time (policy TZ) falls within [start,end] inclusive. */
+function isWithinWithdrawalWindow(policy: Record<string, unknown>, date = new Date()): boolean {
+  const tz = String(policy.withdrawalWindowTimezone ?? 'Etc/UTC')
+  const nowM = wallClockMinutes(date, tz)
+  let s = parseHmToMinutes(String(policy.withdrawalWindowStart ?? '00:00'))
+  let e = parseHmToMinutes(String(policy.withdrawalWindowEnd ?? '23:59'))
+  if (nowM === null || s === null || e === null) return true
+  if (s <= e) return nowM >= s && nowM <= e
+  return nowM >= s || nowM <= e
+}
+
+async function maxActivePrincipalForUser(uid: string): Promise<number> {
+  const snap = await db.collection(COL_ACTIVE).where('userId', '==', uid).where('status', '==', 'active').get()
+  let mx = 0
+  for (const d of snap.docs) {
+    mx = Math.max(mx, Number(d.data()?.amount ?? 0))
+  }
+  return mx
+}
+
+function computeMaxWithdrawalForPrincipal(
+  principal: number,
+  policy: Record<string, unknown>,
+): number {
+  if (principal <= 0) return 0
+  const caps = Array.isArray(policy.withdrawPackageCaps)
+    ? (policy.withdrawPackageCaps as Record<string, unknown>[])
+    : []
+  const usable = caps.filter((row) => row && row.active !== false)
+  const exact = usable.find((row) => Number(row.packageAmount ?? -999) === principal)
+  if (exact != null) {
+    if (exact.usePercentFormula === true) return (principal * Number(exact.percentOfPackage ?? 20)) / 100
+    return Math.max(0, Number(exact.maxWithdrawal ?? 0))
+  }
+  const fallbackPct = Number(policy.defaultWithdrawalPercentOfPackage ?? 20)
+  return (principal * fallbackPct) / 100
+}
+
+type FrozenTeamRow = {
+  level: number
+  percent: number
+  requiredDirects: number
+  conditionDescription?: string
+}
+
+type FrozenRankRow = {
+  id: string
+  name: string
+  requiredTeamBusiness: number
+  dailyReward: number
+  rewardDurationDays: number
+  totalReward: number
+  sortOrder: number
+}
+
+function normalizePowerRestPercent(pRaw: number, rRaw: number): { p: number; r: number } {
+  let p = Math.max(0, Number(pRaw))
+  let r = Math.max(0, Number(rRaw))
+  const s = p + r
+  if (!Number.isFinite(s) || s <= 0) return { p: 50, r: 50 }
+  return { p: (p / s) * 100, r: (r / s) * 100 }
+}
+
+async function freezeTeamLevelsForActivation(maxLevels: number): Promise<FrozenTeamRow[]> {
+  const cap = Math.min(100, Math.max(1, maxLevels))
+  const snap = await db.collection(COL_TEAM_LEVELS).where('active', '==', true).get()
+  const byLevel = new Map<number, FrozenTeamRow>()
+  for (const d of snap.docs) {
+    const x = d.data()
+    const lvl = Number(x.level ?? 0)
+    if (!Number.isFinite(lvl) || lvl < 1) continue
+    const desc = x.conditionDescription != null ? String(x.conditionDescription).trim() : ''
+    byLevel.set(lvl, {
+      level: lvl,
+      percent: Number(x.percent ?? 0),
+      requiredDirects: Number(x.requiredDirects ?? x.directs ?? 0),
+      ...(desc ? { conditionDescription: desc } : {}),
+    })
+  }
+  return Array.from({ length: cap }, (_, i) => {
+    const L = i + 1
+    return byLevel.get(L) ?? { level: L, percent: 0, requiredDirects: 0, conditionDescription: '' }
+  })
+}
+
+async function freezeRankRowsForActivation(): Promise<FrozenRankRow[]> {
+  const snap = await db.collection(COL_RANKS).where('active', '==', true).get()
+  const rows: FrozenRankRow[] = snap.docs.map((d) => {
+    const x = d.data()
+    const daily = Number(x.dailyReward ?? 0)
+    const dur = Number(x.rewardDurationDays ?? x.durationDays ?? 0)
+    const storedTotal = Number(x.totalReward ?? 0)
+    const totalReward = storedTotal > 0 ? storedTotal : daily * dur
+    return {
+      id: d.id,
+      name: String(x.name ?? ''),
+      requiredTeamBusiness: Number(x.requiredTeamBusiness ?? x.teamBiz ?? 0),
+      dailyReward: daily,
+      rewardDurationDays: dur,
+      totalReward,
+      sortOrder: Number(x.sortOrder ?? x.requiredTeamBusiness ?? 0),
+    }
+  })
+  rows.sort((a, b) => (a.sortOrder !== b.sortOrder ? a.sortOrder - b.sortOrder : a.requiredTeamBusiness - b.requiredTeamBusiness))
+  return rows
+}
+
+/** Credits TB + power/rest volume to every uplines for rank qualification (50/50 split of incoming BV by default). */
+async function propagateTeamBusinessVolume(
+  beneficiaryUid: string,
+  amount: number,
+  powerPct: number,
+  restPct: number,
+) {
+  if (amount <= 0) return
+  const { p, r } = normalizePowerRestPercent(powerPct, restPct)
+  const pFrac = p / 100
+  const rFrac = r / 100
+  let cur = beneficiaryUid
+  for (;;) {
+    const cs = await db.collection(COL_USERS).doc(cur).get()
+    if (!cs.exists) break
+    const sponsor = cs.data()?.sponsorUid as string | undefined
+    if (!sponsor) break
+    await db.collection(COL_USERS).doc(sponsor).set(
+      {
+        totalTeamBusiness: FieldValue.increment(amount),
+        powerTeamBusiness: FieldValue.increment(amount * pFrac),
+        restTeamBusiness: FieldValue.increment(amount * rFrac),
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    )
+    cur = sponsor
+  }
+}
+
+/** Sponsor + team-level payouts share one cap: activation × workingIncomeCapMultiplier (default 3). */
+async function payWorkingIncomeForActivation(
+  activePackageId: string,
+  beneficiaryUid: string,
+  amount: number,
+  planSnap: Record<string, unknown>,
+) {
+  const wMult = Number(planSnap.workingIncomeCapMultiplier ?? 3)
+  const capTotal = amount * Math.max(wMult, 0)
+  let used = 0
+
+  const sponsorPct = Number(planSnap.sponsorPercent ?? 5)
+  const bene = await db.collection(COL_USERS).doc(beneficiaryUid).get()
+  const sponsorUid = bene.exists ? (bene.data()?.sponsorUid as string | undefined) : undefined
+
+  const payIncome = async (
+    uid: string,
+    gross: number,
+    kind: 'sponsor' | 'team',
+    bonusColl: string,
+    bonusDoc: Record<string, unknown>,
+  ) => {
+    if (gross <= 0) return
+    const room = capTotal - used
+    const payAmt = Math.min(gross, Math.max(0, room))
+    if (payAmt <= 0) return
+    const payload: Record<string, unknown> = {
+      'wallets.cash': FieldValue.increment(payAmt),
+      workingIncomeBalance: FieldValue.increment(payAmt),
+      updatedAt: Date.now(),
+    }
+    if (kind === 'sponsor') payload.sponsorBonusTotal = FieldValue.increment(payAmt)
+    else payload.teamLevelCommissionTotal = FieldValue.increment(payAmt)
+    await db.collection(COL_USERS).doc(uid).set(payload, { merge: true })
+    await db.collection(bonusColl).add({
+      ...bonusDoc,
+      amount: payAmt,
+      activePackageId,
+      createdAt: FieldValue.serverTimestamp(),
+    })
+    used += payAmt
+  }
+
+  if (sponsorUid) {
+    const gross = (amount * sponsorPct) / 100
+    await payIncome(sponsorUid, gross, 'sponsor', 'sponsorBonuses', {
+      userId: sponsorUid,
+      fromUserId: beneficiaryUid,
+    })
+  }
+
+  const teamFrozen = Array.isArray(planSnap.teamLevels) ? (planSnap.teamLevels as FrozenTeamRow[]) : []
+  let child = beneficiaryUid
+  for (let depth = 0; depth < teamFrozen.length; depth++) {
+    const row = teamFrozen[depth]
+    const childSnap = await db.collection(COL_USERS).doc(child).get()
+    if (!childSnap.exists) break
+    const upl = childSnap.data()?.sponsorUid as string | undefined
+    if (!upl) break
+    if (row && row.percent > 0) {
+      const uplSnap = await db.collection(COL_USERS).doc(upl).get()
+      const directs = Number(uplSnap.data()?.activeDirects ?? 0)
+      if (directs >= row.requiredDirects) {
+        const gross = (amount * row.percent) / 100
+        await payIncome(upl, gross, 'team', 'teamLevelBonuses', {
+          userId: upl,
+          fromUserId: beneficiaryUid,
+          level: row.level,
+          ...(row.conditionDescription ? { conditionDescription: row.conditionDescription } : {}),
+        })
+      }
+    }
+    child = upl
+  }
+
+  await db
+    .collection(COL_ACTIVE)
+    .doc(activePackageId)
+    .set({ workingPaid: used, updatedAt: Date.now() }, { merge: true })
+}
+
+function rankMilestoneQualifies(
+  u: Record<string, unknown>,
+  rank: FrozenRankRow,
+  powerPct: number,
+  restPct: number,
+): boolean {
+  const req = rank.requiredTeamBusiness
+  const tb = Number(u.totalTeamBusiness ?? 0)
+  const pb = Number(u.powerTeamBusiness ?? 0)
+  const rb = Number(u.restTeamBusiness ?? 0)
+  if (tb < req) return false
+  if (pb + rb < 1e-9 && tb > 0) return tb >= req
+  const { p, r } = normalizePowerRestPercent(powerPct, restPct)
+  return pb >= (req * p) / 100 && rb >= (req * r) / 100
+}
+
+function pickNextSequentialRank(
+  u: Record<string, unknown>,
+  ranks: FrozenRankRow[],
+  completed: Set<string>,
+  powerPct: number,
+  restPct: number,
+): FrozenRankRow | null {
+  for (const rank of ranks) {
+    if (completed.has(rank.id)) continue
+    return rankMilestoneQualifies(u, rank, powerPct, restPct) ? rank : null
+  }
+  return null
+}
+
+async function resolveRankPolicyForUser(uid: string, u: Record<string, unknown>) {
+  void uid
+  const snap = u.rankCompensationSnapshot as Record<string, unknown> | undefined
+  const arr = snap?.ranks
+  if (Array.isArray(arr) && arr.length > 0) {
+    const ranks = (arr as Record<string, unknown>[])
+      .map((x) => ({
+        id: String(x.id ?? ''),
+        name: String(x.name ?? ''),
+        requiredTeamBusiness: Number(x.requiredTeamBusiness ?? 0),
+        dailyReward: Number(x.dailyReward ?? 0),
+        rewardDurationDays: Number(x.rewardDurationDays ?? x.durationDays ?? 0),
+        totalReward: Number(x.totalReward ?? 0),
+        sortOrder: Number(x.sortOrder ?? x.requiredTeamBusiness ?? 0),
+      }))
+      .filter((row) => row.id.length > 0)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.requiredTeamBusiness - b.requiredTeamBusiness)
+    const { p, r } = normalizePowerRestPercent(
+      Number(snap?.rankQualificationPowerPercent ?? 50),
+      Number(snap?.rankQualificationRestPercent ?? 50),
+    )
+    return ranks.length ? { ranks, p, r } : null
+  }
+  const live = await freezeRankRowsForActivation()
+  if (live.length === 0) return null
+  const st = (await db.collection(COL_SETTINGS).doc('config').get()).data() ?? {}
+  const { p, r } = normalizePowerRestPercent(
+    Number(st.rankQualificationPowerPercent ?? 50),
+    Number(st.rankQualificationRestPercent ?? 50),
+  )
+  return { ranks: live, p, r }
+}
+
+async function finalizeRankSchedule(uid: string, rankId: string) {
+  await db
+    .collection(COL_USERS)
+    .doc(uid)
+    .set(
+      {
+        rankRewardActive: false,
+        rankRewardDaysPaid: 0,
+        rankRewardTotalDays: 0,
+        rankRewardDailyAmount: 0,
+        rankRewardRankId: '',
+        rankRewardRankName: '',
+        rankRewardLastPaidDayKey: '',
+        completedRankRewardIds: FieldValue.arrayUnion(rankId),
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    )
+}
+
+async function tryStartNextRankSchedule(uid: string) {
+  const ref = db.collection(COL_USERS).doc(uid)
+  const snap = await ref.get()
+  if (!snap.exists) return
+  const u = snap.data() as Record<string, unknown>
+  if (u.rankRewardActive === true) return
+
+  const policy = await resolveRankPolicyForUser(uid, u)
+  if (!policy) return
+
+  const rawDone = u.completedRankRewardIds
+  const done = new Set<string>(Array.isArray(rawDone) ? (rawDone as string[]).map(String) : [])
+  const next = pickNextSequentialRank(u, policy.ranks, done, policy.p, policy.r)
+  if (!next || next.dailyReward <= 0 || next.rewardDurationDays <= 0) return
+
+  await ref.set(
+    {
+      rankRewardActive: true,
+      rankRewardDaysPaid: 0,
+      rankRewardTotalDays: next.rewardDurationDays,
+      rankRewardDailyAmount: next.dailyReward,
+      rankRewardRankId: next.id,
+      rankRewardRankName: next.name,
+      rankRewardLastPaidDayKey: '',
+      currentRank: next.name,
+      updatedAt: Date.now(),
+    },
+    { merge: true },
+  )
+}
+
+/** Team-level qualification: sponsor needs N directs that each maintain ≥1 active package. Bump when beneficiary had zero actives → first active after this txn. */
+async function bumpSponsorActiveDirectWhenDirectGainsFirstActivePackage(memberUid: string) {
+  const bene = await db.collection(COL_USERS).doc(memberUid).get()
+  const sponsor = bene.data()?.sponsorUid as string | undefined
+  if (!sponsor) return
+  await db
+    .collection(COL_USERS)
+    .doc(sponsor)
+    .set({ activeDirects: FieldValue.increment(1), updatedAt: Date.now() }, { merge: true })
+}
+
+/** When a member drops to zero active packages, decrement sponsor once (non-negative). */
+async function maybeDecrementSponsorActiveDirectsWhenNoActivePackages(memberUid: string) {
+  const remain = await db
+    .collection(COL_ACTIVE)
+    .where('userId', '==', memberUid)
+    .where('status', '==', 'active')
+    .limit(1)
+    .get()
+  if (!remain.empty) return
+  const bene = await db.collection(COL_USERS).doc(memberUid).get()
+  const sponsor = bene.data()?.sponsorUid as string | undefined
+  if (!sponsor) return
+  await db.runTransaction(async (tx) => {
+    const sRef = db.collection(COL_USERS).doc(sponsor)
+    const sSnap = await tx.get(sRef)
+    const cur = Number(sSnap.data()?.activeDirects ?? 0)
+    if (cur <= 0) return
+    tx.update(sRef, { activeDirects: cur - 1, updatedAt: Date.now() })
+  })
+}
+
+async function bumpRankEligibilityAlongUpline(beneficiaryUid: string, maxHops = 500) {
+  let cur = beneficiaryUid
+  for (let i = 0; i < maxHops; i++) {
+    const cs = await db.collection(COL_USERS).doc(cur).get()
+    if (!cs.exists) break
+    const sponsor = cs.data()?.sponsorUid as string | undefined
+    if (!sponsor) break
+    await tryStartNextRankSchedule(sponsor)
+    cur = sponsor
+  }
+}
+
+async function processRankRewardForUser(uid: string, dayKey: string) {
+  const ref = db.collection(COL_USERS).doc(uid)
+  const snap = await ref.get()
+  if (!snap.exists) return
+  const u = snap.data() as Record<string, unknown>
+
+  if (u.rankRewardActive === true) {
+    const lastKey = String(u.rankRewardLastPaidDayKey ?? '')
+    if (lastKey === dayKey) return
+
+    const daysPaid = Number(u.rankRewardDaysPaid ?? 0)
+    const totalDays = Number(u.rankRewardTotalDays ?? 0)
+    const rankId = String(u.rankRewardRankId ?? '')
+    const daily = Number(u.rankRewardDailyAmount ?? 0)
+    const rankName = String(u.rankRewardRankName ?? 'Rank')
+
+    if (totalDays <= 0 || daily <= 0 || !rankId) {
+      await ref.set({ rankRewardActive: false, updatedAt: Date.now() }, { merge: true })
+      await tryStartNextRankSchedule(uid)
+      return
+    }
+
+    if (daysPaid >= totalDays) {
+      await finalizeRankSchedule(uid, rankId)
+      await tryStartNextRankSchedule(uid)
+      return
+    }
+
+    const nextDay = daysPaid + 1
+    const bonusId = `${uid}_${dayKey}_${rankId}_d${nextDay}`
+    const existed = await db.collection('rankBonuses').doc(bonusId).get()
+    if (existed.exists) return
+
+    await db.collection('rankBonuses').doc(bonusId).set({
+      userId: uid,
+      rankId,
+      rankName,
+      amount: daily,
+      dayKey,
+      payoutSequenceDay: nextDay,
+      payoutDaysTotal: totalDays,
+      scheduledPayout: true,
+      transactionType: 'Ranking Bonus',
+      createdAt: FieldValue.serverTimestamp(),
+    })
+
+    await ref.set(
+      {
+        'wallets.cash': FieldValue.increment(daily),
+        rankCommissionTotal: FieldValue.increment(daily),
+        workingIncomeBalance: FieldValue.increment(daily),
+        rankRewardDaysPaid: nextDay,
+        rankRewardLastPaidDayKey: dayKey,
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    )
+
+    if (nextDay >= totalDays) {
+      await finalizeRankSchedule(uid, rankId)
+      await tryStartNextRankSchedule(uid)
+    }
+    return
+  }
+
+  await tryStartNextRankSchedule(uid)
+}
 
 function audit(actorUid: string, action: string, detail: Record<string, unknown>) {
   return db.collection('auditLogs').add({
@@ -142,6 +652,16 @@ export const registerWithProfile = onCall(callableRuntimeOpts, async (request) =
     activeDirects: 0,
     currentRank: '—',
     totalTeamBusiness: 0,
+    powerTeamBusiness: 0,
+    restTeamBusiness: 0,
+    rankRewardActive: false,
+    rankRewardDaysPaid: 0,
+    rankRewardTotalDays: 0,
+    rankRewardDailyAmount: 0,
+    rankRewardRankId: '',
+    rankRewardRankName: '',
+    rankRewardLastPaidDayKey: '',
+    completedRankRewardIds: [],
     nonWorkingIncomeBalance: 0,
     workingIncomeBalance: 0,
     sponsorBonusTotal: 0,
@@ -158,12 +678,7 @@ export const registerWithProfile = onCall(callableRuntimeOpts, async (request) =
   batch.set(phoneRef, { uid: userRecord.uid })
   await batch.commit()
 
-  if (sponsorUid) {
-    await db
-      .collection(COL_USERS)
-      .doc(sponsorUid)
-      .set({ activeDirects: FieldValue.increment(1) }, { merge: true })
-  }
+  /** `activeDirects` is maintained when a direct activates their first package / loses last active package. */
 
   return { username, uid: userRecord.uid }
 })
@@ -512,10 +1027,80 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
     )
   }
 
+  const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get()
+  const settings = settingsSnap.data() ?? {}
+  const teamDepth = Math.min(100, Math.max(1, Number(settings.teamLevelsCount ?? 30)))
+  const sponsorPctFrozen = Number(settings.sponsorPercent ?? 5)
+  const pkgNwMult = Number(pkg.maxRoiMultiplier ?? 2)
+  const siteNwMult = Number(settings.nonWorkingIncomeCapMultiplier ?? 2)
+  const frozenNonWorkingCapMultiplier = pkgNwMult > 0 ? pkgNwMult : siteNwMult
+  const frozenWorkingCapMultiplier = Number(settings.workingIncomeCapMultiplier ?? 3)
+  const minWithdrawFrozen = Number(settings.minWithdrawal ?? 10)
+  const withdrawFeeFrozen = Number(settings.withdrawFeePercent ?? 10)
+  const planSettingsVersion = Number(settings.planSettingsVersion ?? 0)
+  const rkPowerIn = Number(settings.rankQualificationPowerPercent ?? 50)
+  const rkRestIn = Number(settings.rankQualificationRestPercent ?? 50)
+  const { p: rkPowerPct, r: rkRestPct } = normalizePowerRestPercent(rkPowerIn, rkRestIn)
+
   const roiPercent = Number(pkg.roiPercent ?? 0)
   const durationDays = Number(pkg.durationDays ?? 0)
-  const planLabel = planType === 2 ? 'compounding' : 'daily'
+  const planWantCompound = planType === 2
+  const pkgShelfRaw = String(pkg.packageShelf ?? 'investment').toLowerCase()
+  const pkgShelf = pkgShelfRaw === 'compounding' ? 'compounding' : 'investment'
+  if (planWantCompound && pkgShelf !== 'compounding') {
+    throw new HttpsError(
+      'invalid-argument',
+      'Choose a Rich Compounding tier (Package Management → Compounding) when using Compounding plan type.',
+    )
+  }
+  if (!planWantCompound && pkgShelf === 'compounding') {
+    throw new HttpsError(
+      'invalid-argument',
+      'This tier is Rich Compounding only — select Compounding plan type.',
+    )
+  }
+  const planLabel = planWantCompound ? 'compounding' : 'daily'
+  const capturedAt = Date.now()
+
+  const withdrawFrozen = freezeWithdrawPolicyFromSettings(settings)
+
+  const teamLevelsFrozen = await freezeTeamLevelsForActivation(teamDepth)
+  const ranksFrozen = await freezeRankRowsForActivation()
+
+  const planSnapshot: Record<string, unknown> = {
+    schemaVersion: 2,
+    capturedAtMillis: capturedAt,
+    planSettingsVersionAtCapture: planSettingsVersion,
+    packageId,
+    packageName: String(pkg.name ?? ''),
+    activationAmount: amount,
+    roiPercent,
+    durationDays,
+    planType: planLabel,
+    nonWorkingIncomeCapMultiplier: frozenNonWorkingCapMultiplier,
+    workingIncomeCapMultiplier: frozenWorkingCapMultiplier,
+    totalReturnMultiplier: frozenNonWorkingCapMultiplier,
+    totalReturnPercent: frozenNonWorkingCapMultiplier * 100,
+    sponsorPercent: sponsorPctFrozen,
+    minWithdrawal: minWithdrawFrozen,
+    withdrawFeePercent: withdrawFeeFrozen,
+    rankQualificationPowerPercent: rkPowerPct,
+    rankQualificationRestPercent: rkRestPct,
+    teamLevels: teamLevelsFrozen,
+    ranks: ranksFrozen,
+    withdrawalPolicySnapshot: withdrawFrozen,
+    roiAccrualMode: planLabel === 'compounding' ? 'compound_balance' : 'flat_principal',
+  }
+
   const apRef = db.collection(COL_ACTIVE).doc()
+
+  const preActiveForBene = await db
+    .collection(COL_ACTIVE)
+    .where('userId', '==', beneficiaryUid)
+    .where('status', '==', 'active')
+    .limit(1)
+    .get()
+  const beneHadNoActivePackage = preActiveForBene.empty
 
   await db.runTransaction(async (tx) => {
     const uRef = db.collection(COL_USERS).doc(uid)
@@ -545,41 +1130,48 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
       status: 'active',
       planType: planLabel,
       purchasedByUid: uid,
+      frozenNonWorkingCapMultiplier,
+      frozenWorkingCapMultiplier,
+      planSnapshot,
+      ...(planLabel === 'compounding' ? { compoundingBalance: amount } : {}),
     })
   })
 
-  // Sponsor bonus (direct) — beneficiary’s sponsor
-  const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get()
-  const sponsorPct = Number(settingsSnap.data()?.sponsorPercent ?? 5)
-  const beneForSponsor = await db.collection(COL_USERS).doc(beneficiaryUid).get()
-  const sponsorUid = beneForSponsor.data()?.sponsorUid as string | undefined
-  if (sponsorUid) {
-    const bonus = (amount * sponsorPct) / 100
-    await db
-      .collection(COL_USERS)
-      .doc(sponsorUid)
-      .set(
-        {
-          'wallets.cash': FieldValue.increment(bonus),
-          sponsorBonusTotal: FieldValue.increment(bonus),
-          workingIncomeBalance: FieldValue.increment(bonus),
-          updatedAt: Date.now(),
+  await payWorkingIncomeForActivation(apRef.id, beneficiaryUid, amount, planSnapshot)
+
+  await propagateTeamBusinessVolume(beneficiaryUid, amount, rkPowerPct, rkRestPct)
+
+  await db
+    .collection(COL_USERS)
+    .doc(beneficiaryUid)
+    .set(
+      {
+        rankCompensationSnapshot: {
+          teamLevels: teamLevelsFrozen,
+          ranks: ranksFrozen,
+          rankQualificationPowerPercent: rkPowerPct,
+          rankQualificationRestPercent: rkRestPct,
+          planSettingsVersionAtCapture: planSettingsVersion,
+          capturedAtMillis: capturedAt,
         },
-        { merge: true },
-      )
-    await db.collection('sponsorBonuses').add({
-      userId: sponsorUid,
-      fromUserId: beneficiaryUid,
-      amount: bonus,
-      createdAt: FieldValue.serverTimestamp(),
-    })
+        withdrawalPolicySnapshot: withdrawFrozen,
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    )
+
+  if (beneHadNoActivePackage) {
+    await bumpSponsorActiveDirectWhenDirectGainsFirstActivePackage(beneficiaryUid)
   }
+  await bumpRankEligibilityAlongUpline(beneficiaryUid)
 
   await audit(uid, 'activatePackage', {
     packageId,
     amount,
     beneficiaryUid,
     planType: planLabel,
+    planSettingsVersionAtCapture: planSettingsVersion,
+    activePackageId: apRef.id,
   })
   return { activePackageId: apRef.id }
 })
@@ -617,10 +1209,43 @@ export const createWithdrawal = onCall(callableRuntimeOpts, async (request) => {
   }
 
   const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get()
-  const minW = Number(settingsSnap.data()?.minWithdrawal ?? 25)
-  const feePct = Number(settingsSnap.data()?.withdrawFeePercent ?? 10)
+  const liveSettings = settingsSnap.data() ?? {}
+  const livePol = freezeWithdrawPolicyFromSettings(liveSettings)
+  const frozen = caller.withdrawalPolicySnapshot as Record<string, unknown> | undefined
+  const policy: Record<string, unknown> =
+    frozen && typeof frozen === 'object' && Object.keys(frozen).length > 0
+      ? { ...livePol, ...frozen }
+      : livePol
+
+  if (policy.withdrawalsEnabled === false) {
+    throw new HttpsError('failed-precondition', 'Withdrawals are temporarily disabled')
+  }
+
+  if (!isWithinWithdrawalWindow(policy)) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Withdrawals are only allowed during the published time window.',
+    )
+  }
+
+  const minW = Number(policy.minWithdrawal ?? 10)
+  const feePct = Number(policy.withdrawFeePercent ?? 10)
   if (amount < minW) {
     throw new HttpsError('invalid-argument', `Minimum withdrawal ${minW}`)
+  }
+
+  const maxPrincipal = await maxActivePrincipalForUser(uid)
+  if (policy.withdrawalRequiresActivePackage !== false) {
+    if (maxPrincipal <= 0) {
+      throw new HttpsError('failed-precondition', 'An active package is required to withdraw.')
+    }
+    const cap = computeMaxWithdrawalForPrincipal(maxPrincipal, policy)
+    if (amount > cap + 1e-6) {
+      throw new HttpsError(
+        'invalid-argument',
+        `Amount exceeds the maximum allowed for your active package (${cap.toFixed(2)} USDT).`,
+      )
+    }
   }
 
   const fee = (amount * feePct) / 100
@@ -645,6 +1270,7 @@ export const createWithdrawal = onCall(callableRuntimeOpts, async (request) => {
       amountNet: net,
       address,
       status: 'pending',
+      policySnapshot: policy,
       createdAt: FieldValue.serverTimestamp(),
     })
   })
@@ -955,19 +1581,17 @@ export const adminWithdrawalUpdate = onCall(callableRuntimeOpts, async (request)
       if (cur !== 'pending' && cur !== 'approved' && cur !== 'processing') {
         throw new HttpsError('failed-precondition', 'Withdrawal must be pending, approved, or processing')
       }
-      if (!txHash) {
-        throw new HttpsError('invalid-argument', 'txHash is required to mark paid')
-      }
+      const resolvedTx = txHash.length > 0 ? txHash : 'PENDING_CONFIRMATION'
       tx.update(ref, {
         status: 'paid',
-        txId: txHash,
+        txId: resolvedTx,
         paidAt: FieldValue.serverTimestamp(),
         updatedAt: Date.now(),
       })
       mailbox.push({
         userId: uid,
         title: 'Withdrawal paid',
-        body: `Sent. TX: ${txHash}`,
+        body: `Marked paid. TX/reference: ${resolvedTx}`,
       })
       return
     }
@@ -1157,11 +1781,157 @@ export const adminBroadcastNotification = onCall(callableRuntimeOpts, async (req
   return { sent: total }
 })
 
-/** Nightly ROI accrual — explicit region/schedule avoids flaky scheduler deploy (“HTML not JSON”). */
+/** Writes reference compensation rows only when their doc id is missing (safe to run multiple times). */
+export const adminSeedCompensationDefaults = onCall(callableRuntimeOpts, async (request) => {
+  if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')
+  const actorUid = request.auth.uid
+  await assertFirestoreAdmin(actorUid)
+
+  const data = request.data as {
+    seedTeamLevels?: boolean
+    seedRanks?: boolean
+    seedCompoundPlans?: boolean
+    seedWithdrawDefaults?: boolean
+  } | undefined
+  const seedTeamLevels = data?.seedTeamLevels !== false
+  const seedRanks = data?.seedRanks !== false
+  const seedCompoundPlans = data?.seedCompoundPlans === true
+  const seedWithdrawDefaults = data?.seedWithdrawDefaults === true
+
+  let teamLevelsInserted = 0
+  let ranksInserted = 0
+  let compoundPlansInserted = 0
+
+  if (seedTeamLevels) {
+    for (const row of REFERENCE_TEAM_LEVEL_SEED) {
+      const ref = db.collection(COL_TEAM_LEVELS).doc(row.id)
+      const ex = await ref.get()
+      if (!ex.exists) {
+        await ref.set({
+          level: row.level,
+          percent: row.percent,
+          requiredDirects: row.requiredDirects,
+          conditionDescription: row.conditionDescription,
+          sortOrder: row.sortOrder,
+          active: true,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        })
+        teamLevelsInserted++
+      }
+    }
+  }
+
+  if (seedRanks) {
+    for (const row of REFERENCE_RANK_SEED) {
+      const ref = db.collection(COL_RANKS).doc(row.id)
+      const ex = await ref.get()
+      if (!ex.exists) {
+        await ref.set({
+          name: row.name,
+          requiredTeamBusiness: row.requiredTeamBusiness,
+          dailyReward: row.dailyReward,
+          rewardDurationDays: row.rewardDurationDays,
+          totalReward: row.totalReward,
+          sortOrder: row.sortOrder,
+          active: true,
+          updatedAt: Date.now(),
+        })
+        ranksInserted++
+      }
+    }
+  }
+
+  if (seedCompoundPlans) {
+    for (const row of REFERENCE_COMPOUNDING_PLANS) {
+      const ref = db.collection(COL_PACKAGES).doc(row.id)
+      const ex = await ref.get()
+      if (!ex.exists) {
+        const roi = compoundRoiPercentForDoubleInDays(row.durationDays)
+        await ref.set({
+          name: row.name,
+          minAmount: row.amount,
+          maxAmount: row.amount,
+          roiPercent: roi,
+          durationDays: row.durationDays,
+          maxRoiMultiplier: row.maxRoiMultiplier,
+          packageShelf: 'compounding',
+          active: true,
+          description: 'Rich Compounding — accumulates to 2× cap (snapshot at activation).',
+          sortOrder: row.sortOrder,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        })
+        compoundPlansInserted++
+      }
+    }
+  }
+
+  const cfgRef = db.collection(COL_SETTINGS).doc('config')
+  const cfgSnap = await cfgRef.get()
+  const c = cfgSnap.data() ?? {}
+  const ratioPatch: Record<string, unknown> = {}
+  if (c.rankQualificationPowerPercent == null) ratioPatch.rankQualificationPowerPercent = 50
+  if (c.rankQualificationRestPercent == null) ratioPatch.rankQualificationRestPercent = 50
+
+  let withdrawDefaultsApplied = false
+  if (seedWithdrawDefaults) {
+    const withdrawSeed: Record<string, unknown> = {}
+    if (!Array.isArray(c.withdrawPackageCaps) || (c.withdrawPackageCaps as unknown[]).length === 0) {
+      withdrawSeed.withdrawPackageCaps = REFERENCE_WITHDRAW_PACKAGE_CAPS_SEED.map((row) => ({ ...row }))
+    }
+    if (c.minWithdrawal == null) withdrawSeed.minWithdrawal = 10
+    if (c.withdrawFeePercent == null) withdrawSeed.withdrawFeePercent = 10
+    if (c.withdrawalsEnabled === undefined) withdrawSeed.withdrawalsEnabled = true
+    if (c.withdrawNetworkLabel == null) withdrawSeed.withdrawNetworkLabel = 'USDT BEP-20'
+    if (c.withdrawalWindowStart == null) withdrawSeed.withdrawalWindowStart = '10:30'
+    if (c.withdrawalWindowEnd == null) withdrawSeed.withdrawalWindowEnd = '13:30'
+    if (c.withdrawalWindowTimezone == null) withdrawSeed.withdrawalWindowTimezone = 'Etc/UTC'
+    if (c.withdrawalRequiresActivePackage === undefined) withdrawSeed.withdrawalRequiresActivePackage = true
+    if (c.withdrawalProcessingIntervalHours == null) withdrawSeed.withdrawalProcessingIntervalHours = 48
+    if (c.withdrawalProcessingMode == null) withdrawSeed.withdrawalProcessingMode = 'manual'
+    if (c.defaultWithdrawalPercentOfPackage == null) withdrawSeed.defaultWithdrawalPercentOfPackage = 20
+    if (Object.keys(withdrawSeed).length > 0) {
+      withdrawDefaultsApplied = true
+      await cfgRef.set(
+        {
+          ...withdrawSeed,
+          withdrawPoliciesVersion: FieldValue.increment(1),
+          updatedAt: Date.now(),
+        },
+        { merge: true },
+      )
+    }
+  }
+
+  if (Object.keys(ratioPatch).length > 0) {
+    await cfgRef.set({ ...ratioPatch, updatedAt: Date.now() }, { merge: true })
+  }
+
+  await audit(actorUid, 'adminSeedCompensationDefaults', {
+    teamLevelsInserted,
+    ranksInserted,
+    compoundPlansInserted,
+    withdrawDefaultsApplied,
+    seedTeamLevels,
+    seedRanks,
+    seedCompoundPlans,
+    seedWithdrawDefaults,
+  })
+  return {
+    ok: true,
+    teamLevelsInserted,
+    ranksInserted,
+    compoundPlansInserted,
+    withdrawDefaultsApplied,
+  }
+})
+
+/** Daily ROI accrual at 00:00 India Standard Time (Asia/Kolkata, UTC+5:30). */
 export const processDailyRoi = onSchedule(
   {
-    schedule: '0 2 * * *',
-    timeZone: 'Etc/UTC',
+    schedule: '0 0 * * *',
+    timeZone: 'Asia/Kolkata',
     region: 'us-central1',
     memory: '512MiB',
     timeoutSeconds: 540,
@@ -1177,24 +1947,42 @@ export const processDailyRoi = onSchedule(
   for (const docSnap of snap.docs) {
     const ap = docSnap.data()
     const endsAt = ap.endsAt as Timestamp
+    const userIdEarly = String(ap.userId ?? '')
     if (endsAt.toMillis() < now.toMillis()) {
       await docSnap.ref.set({ status: 'completed', updatedAt: now }, { merge: true })
+      if (userIdEarly) await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(userIdEarly)
       continue
     }
 
     const amount = Number(ap.amount ?? 0)
-    const roiPercent = Number(ap.roiPercent ?? 0)
-    const userId = String(ap.userId)
+    const planSnap = (ap.planSnapshot ?? null) as Record<string, unknown> | null
+    const roiPercent = Number(
+      (planSnap && planSnap.roiPercent != null ? planSnap.roiPercent : null) ?? ap.roiPercent ?? 0,
+    )
+    const userId = userIdEarly
     const nonWorkingPaid = Number(ap.nonWorkingPaid ?? 0)
-    const cap = amount * 2
-    const daily = (amount * roiPercent) / 100
+    const nwMult = Number(
+      ap.frozenNonWorkingCapMultiplier ??
+        (planSnap?.nonWorkingIncomeCapMultiplier as number | undefined) ??
+        2,
+    )
+    const cap = amount * Math.max(nwMult, 0)
+    const planTypeStr = String(
+      (planSnap && planSnap.planType != null ? planSnap.planType : null) ?? ap.planType ?? 'daily',
+    ).toLowerCase()
+    const compound = planTypeStr === 'compounding'
+    const bal = compound ? Number(ap.compoundingBalance ?? amount) : amount
+    const daily = (bal * roiPercent) / 100
     if (nonWorkingPaid + daily > cap) {
       await docSnap.ref.set({ status: 'capped', updatedAt: now }, { merge: true })
+      await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(userId)
       continue
     }
 
     const newPaid = nonWorkingPaid + daily
-    await docSnap.ref.update({ nonWorkingPaid: newPaid })
+    const patch: Record<string, unknown> = { nonWorkingPaid: newPaid }
+    if (compound) patch.compoundingBalance = bal + daily
+    await docSnap.ref.update(patch)
     await db
       .collection(COL_USERS)
       .doc(userId)
@@ -1215,5 +2003,87 @@ export const processDailyRoi = onSchedule(
       createdAt: FieldValue.serverTimestamp(),
     })
   }
+  },
+)
+
+/**
+ * Scheduled ranking bonus drip: each user with an active rank payout schedule gets at most one
+ * credit per UTC day; milestones and ratios use `rankCompensationSnapshot` when present.
+ */
+export const processDailyRankRewards = onSchedule(
+  {
+    schedule: '30 3 * * *',
+    timeZone: 'Etc/UTC',
+    region: 'us-central1',
+    memory: '512MiB',
+    timeoutSeconds: 540,
+  },
+  async () => {
+    const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get()
+    if (settingsSnap.exists && settingsSnap.data()?.rankRewardsEnabled === false) {
+      return
+    }
+
+    const dayKey = new Date().toISOString().slice(0, 10)
+    let last: QueryDocumentSnapshot | undefined
+    const pageSize = 400
+    for (;;) {
+      let q = db.collection(COL_USERS).orderBy(FieldPath.documentId()).limit(pageSize)
+      if (last) q = q.startAfter(last)
+      const page = await q.get()
+      if (page.empty) break
+
+      for (const docSnap of page.docs) {
+        await processRankRewardForUser(docSnap.id, dayKey)
+      }
+
+      last = page.docs[page.docs.length - 1]
+      if (page.size < pageSize) break
+    }
+  },
+)
+
+/** When withdrawal processing mode is auto, completes approved rows on the configured cadence (~48h). */
+export const processAutoWithdrawals = onSchedule(
+  {
+    schedule: '15 */6 * * *',
+    timeZone: 'Etc/UTC',
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 300,
+  },
+  async () => {
+    const cfgRef = db.collection(COL_SETTINGS).doc('config')
+    const settingsSnap = await cfgRef.get()
+    const st = settingsSnap.data() ?? {}
+    if (String(st.withdrawalProcessingMode ?? 'manual').toLowerCase() !== 'auto') return
+    if (st.withdrawalsEnabled === false) return
+    const hrs = Math.min(336, Math.max(1, Number(st.withdrawalProcessingIntervalHours ?? 48)))
+    const last = Number(st.lastAutoWithdrawalRunAt ?? 0)
+    if (Date.now() - last < hrs * 3600000 - 60_000) return
+
+    const q = await db.collection(COL_WITHDRAWALS).where('status', '==', 'approved').get()
+    for (const d of q.docs) {
+      await d.ref.set(
+        {
+          status: 'paid',
+          txId: 'AUTO_PENDING_TX',
+          autoMarkedPaid: true,
+          paidAt: FieldValue.serverTimestamp(),
+          updatedAt: Date.now(),
+        },
+        { merge: true },
+      )
+      const row = d.data()
+      await db.collection('notifications').add({
+        userId: String(row.userId ?? ''),
+        title: 'Withdrawal completed',
+        body: 'Your withdrawal was processed by the automated payout cycle. Reference: AUTO_PENDING_TX',
+        read: false,
+        createdAt: FieldValue.serverTimestamp(),
+      })
+    }
+
+    await cfgRef.set({ lastAutoWithdrawalRunAt: Date.now() }, { merge: true })
   },
 )

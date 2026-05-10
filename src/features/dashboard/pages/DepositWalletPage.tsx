@@ -1,4 +1,6 @@
+import { DepositSettingsStrip } from '@/components/deposits/DepositSettingsStrip'
 import { useAuthState } from '@/hooks/useAuth'
+import { useSiteSettings } from '@/hooks/useSiteSettings'
 import { useWalletTransactionHistory } from '@/hooks/useWalletTransactionHistory'
 
 /** Matches template: 04/05/2026 05:44 AM */
@@ -41,6 +43,7 @@ const DEPOSIT_HISTORY_ERROR = 'Could not load deposit wallet history.'
 
 export function DepositWalletPage() {
   const { profile } = useAuthState()
+  const { settings, loaded: settingsLoaded } = useSiteSettings()
   const { rows, loading } = useWalletTransactionHistory('deposit', DEPOSIT_HISTORY_ERROR)
 
   const balance = profile?.wallets.deposit ?? 0
@@ -55,6 +58,7 @@ export function DepositWalletPage() {
                 <h4 className="card-title">Balance - $ {balance.toFixed(2)}</h4>
               </div>
               <div className="card-body">
+                <DepositSettingsStrip settings={settings} settingsLoaded={settingsLoaded} showQrThumb />
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">
                     <thead>

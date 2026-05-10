@@ -30,9 +30,16 @@ export function PackageTopupPage() {
 
   const sortedPackages = useMemo(() => sortPackages(packages), [packages])
 
+  const catalog = useMemo(() => {
+    const wantCompound = ptype === '2'
+    return sortedPackages.filter((p) =>
+      wantCompound ? p.packageShelf === 'compounding' : p.packageShelf !== 'compounding',
+    )
+  }, [sortedPackages, ptype])
+
   const selectedPkg = useMemo(
-    () => sortedPackages.find((p) => p.id === selectedPackageId),
-    [sortedPackages, selectedPackageId],
+    () => catalog.find((p) => p.id === selectedPackageId),
+    [catalog, selectedPackageId],
   )
 
   useEffect(() => {
@@ -40,6 +47,7 @@ export function PackageTopupPage() {
     return onSnapshot(q, (snap) => {
       const next: PackageDef[] = snap.docs.map((d) => {
         const x = d.data() as Record<string, unknown>
+        const shelfRaw = String(x.packageShelf ?? 'investment').toLowerCase()
         return {
           id: d.id,
           name: String(x.name ?? 'Package'),
@@ -49,6 +57,8 @@ export function PackageTopupPage() {
           durationDays: Number(x.durationDays ?? 0),
           active: Boolean(x.active),
           sortOrder: Number(x.sortOrder ?? 0),
+          maxRoiMultiplier: Number(x.maxRoiMultiplier ?? 2),
+          packageShelf: shelfRaw === 'compounding' ? 'compounding' : 'investment',
         }
       })
       setPackages(next)
@@ -56,13 +66,13 @@ export function PackageTopupPage() {
   }, [])
 
   useEffect(() => {
-    if (sortedPackages.length === 0) {
+    if (catalog.length === 0) {
       setSelectedPackageId('')
       return
     }
-    const stillValid = sortedPackages.some((p) => p.id === selectedPackageId)
-    if (!stillValid) setSelectedPackageId(sortedPackages[0].id)
-  }, [sortedPackages, selectedPackageId])
+    const stillValid = catalog.some((p) => p.id === selectedPackageId)
+    if (!stillValid) setSelectedPackageId(catalog[0].id)
+  }, [catalog, selectedPackageId])
 
   useEffect(() => {
     if (!selectedPkg) {
@@ -199,12 +209,12 @@ export function PackageTopupPage() {
                       className="default-select form-control wide mb-3"
                       value={selectedPackageId}
                       onChange={(e) => setSelectedPackageId(e.target.value)}
-                      disabled={busy || sortedPackages.length === 0}
+                      disabled={busy || catalog.length === 0}
                     >
-                      {sortedPackages.length === 0 ? (
-                        <option value="">No packages available</option>
+                      {catalog.length === 0 ? (
+                        <option value="">No packages for this plan type</option>
                       ) : (
-                        sortedPackages.map((p) => {
+                        catalog.map((p) => {
                           const lo = Math.min(p.minAmount, p.maxAmount)
                           const hi = Math.max(p.minAmount, p.maxAmount)
                           const range = lo === hi ? `$${lo}` : `$${lo} – $${hi}`

@@ -10,13 +10,28 @@ const defaults: SiteSettings = {
   currencyLabel: 'USDT',
   timezone: 'UTC',
   depositWalletAddress: '0x0000000000000000000000000000000000000000',
-  depositNetwork: 'BEP20 (USDT)',
+  depositNetwork: 'USDT BEP-20',
   depositInstructions: '',
   minDeposit: 50,
-  minWithdrawal: 25,
+  minWithdrawal: 10,
   withdrawFeePercent: 10,
+  withdrawalsEnabled: true,
+  withdrawNetworkLabel: 'USDT BEP-20',
+  withdrawalWindowTimezone: 'Etc/UTC',
+  withdrawalWindowStart: '10:30',
+  withdrawalWindowEnd: '13:30',
+  withdrawalRequiresActivePackage: true,
+  withdrawalProcessingIntervalHours: 48,
+  withdrawalProcessingMode: 'manual',
+  defaultWithdrawalPercentOfPackage: 20,
+  withdrawPackageCaps: [],
   sponsorPercent: 5,
   teamLevelsCount: 30,
+  nonWorkingIncomeCapMultiplier: 2,
+  workingIncomeCapMultiplier: 3,
+  rankRewardsEnabled: true,
+  rankQualificationPowerPercent: 50,
+  rankQualificationRestPercent: 50,
   roiEnabled: true,
   roiProcessHourUtc: 0,
   allowPeerActivationTransfer: true,
@@ -60,8 +75,58 @@ export function useSiteSettings() {
           minDeposit: Number(d.minDeposit ?? defaults.minDeposit),
           minWithdrawal: Number(d.minWithdrawal ?? defaults.minWithdrawal),
           withdrawFeePercent: Number(d.withdrawFeePercent ?? defaults.withdrawFeePercent),
+          withdrawalsEnabled: d.withdrawalsEnabled !== undefined ? Boolean(d.withdrawalsEnabled) : defaults.withdrawalsEnabled,
+          withdrawNetworkLabel:
+            d.withdrawNetworkLabel != null ? String(d.withdrawNetworkLabel) : defaults.withdrawNetworkLabel,
+          withdrawalWindowTimezone:
+            d.withdrawalWindowTimezone != null
+              ? String(d.withdrawalWindowTimezone)
+              : defaults.withdrawalWindowTimezone,
+          withdrawalWindowStart:
+            d.withdrawalWindowStart != null ? String(d.withdrawalWindowStart) : defaults.withdrawalWindowStart,
+          withdrawalWindowEnd:
+            d.withdrawalWindowEnd != null ? String(d.withdrawalWindowEnd) : defaults.withdrawalWindowEnd,
+          withdrawalRequiresActivePackage:
+            d.withdrawalRequiresActivePackage !== undefined
+              ? Boolean(d.withdrawalRequiresActivePackage)
+              : defaults.withdrawalRequiresActivePackage,
+          withdrawalProcessingIntervalHours: Number(
+            d.withdrawalProcessingIntervalHours ?? defaults.withdrawalProcessingIntervalHours,
+          ),
+          withdrawalProcessingMode:
+            d.withdrawalProcessingMode === 'auto'
+              ? 'auto'
+              : d.withdrawalProcessingMode === 'manual'
+                ? 'manual'
+                : defaults.withdrawalProcessingMode,
+          defaultWithdrawalPercentOfPackage: Number(
+            d.defaultWithdrawalPercentOfPackage ?? defaults.defaultWithdrawalPercentOfPackage,
+          ),
+          withdrawPackageCaps: Array.isArray(d.withdrawPackageCaps)
+            ? (d.withdrawPackageCaps as SiteSettings['withdrawPackageCaps']) ?? []
+            : defaults.withdrawPackageCaps,
+          withdrawPoliciesVersion:
+            d.withdrawPoliciesVersion !== undefined ? Number(d.withdrawPoliciesVersion) : undefined,
+          lastAutoWithdrawalRunAt:
+            d.lastAutoWithdrawalRunAt !== undefined ? Number(d.lastAutoWithdrawalRunAt) : undefined,
           sponsorPercent: Number(d.sponsorPercent ?? defaults.sponsorPercent),
           teamLevelsCount: Number(d.teamLevelsCount ?? defaults.teamLevelsCount),
+          planSettingsVersion:
+            d.planSettingsVersion !== undefined ? Number(d.planSettingsVersion) : undefined,
+          nonWorkingIncomeCapMultiplier: Number(
+            d.nonWorkingIncomeCapMultiplier ?? defaults.nonWorkingIncomeCapMultiplier ?? 2,
+          ),
+          workingIncomeCapMultiplier: Number(
+            d.workingIncomeCapMultiplier ?? defaults.workingIncomeCapMultiplier ?? 3,
+          ),
+          rankRewardsEnabled:
+            d.rankRewardsEnabled !== undefined ? Boolean(d.rankRewardsEnabled) : defaults.rankRewardsEnabled,
+          rankQualificationPowerPercent: Number(
+            d.rankQualificationPowerPercent ?? defaults.rankQualificationPowerPercent ?? 50,
+          ),
+          rankQualificationRestPercent: Number(
+            d.rankQualificationRestPercent ?? defaults.rankQualificationRestPercent ?? 50,
+          ),
           roiEnabled: d.roiEnabled !== undefined ? Boolean(d.roiEnabled) : defaults.roiEnabled,
           roiProcessHourUtc: Number(d.roiProcessHourUtc ?? defaults.roiProcessHourUtc ?? 0),
           allowPeerActivationTransfer:

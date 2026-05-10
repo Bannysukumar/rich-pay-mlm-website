@@ -8,6 +8,7 @@ export type PublicTeamLevelRow = {
   level: number
   percent: number
   requiredDirects: number
+  conditionDescription?: string
   sortOrder: number
 }
 
@@ -32,6 +33,8 @@ export function usePublicTeamLevels() {
             level: Number(x.level ?? 0),
             percent: Number(x.percent ?? 0),
             requiredDirects: Number(x.requiredDirects ?? x.directs ?? 0),
+            conditionDescription:
+              x.conditionDescription != null ? String(x.conditionDescription).trim() : undefined,
             sortOrder: Number(x.sortOrder ?? x.level ?? 0),
           }
         })

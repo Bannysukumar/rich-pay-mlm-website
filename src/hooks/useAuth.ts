@@ -6,7 +6,7 @@ import type { RootState } from '@/app/store'
 import { clearSession, setSession } from '@/app/authSlice'
 import { auth, db } from '@/lib/firebase'
 import { COLLECTIONS } from '@/lib/constants'
-import type { UserProfile } from '@/types/models'
+import type { RankCompensationSnapshot, UserProfile } from '@/types/models'
 
 function mapUserDoc(uid: string, data: Record<string, unknown>): UserProfile {
   const raw = data.wallets as Record<string, unknown> | null | undefined
@@ -30,12 +30,28 @@ function mapUserDoc(uid: string, data: Record<string, unknown>): UserProfile {
     activeDirects: Number(data.activeDirects ?? 0),
     currentRank: String(data.currentRank ?? '—'),
     totalTeamBusiness: Number(data.totalTeamBusiness ?? 0),
+    powerTeamBusiness: Number(data.powerTeamBusiness ?? 0),
+    restTeamBusiness: Number(data.restTeamBusiness ?? 0),
     nonWorkingIncomeBalance: Number(data.nonWorkingIncomeBalance ?? 0),
     workingIncomeBalance: Number(data.workingIncomeBalance ?? 0),
     sponsorBonusTotal: Number(data.sponsorBonusTotal ?? 0),
     dailyProfitsTotal: Number(data.dailyProfitsTotal ?? 0),
     teamLevelCommissionTotal: Number(data.teamLevelCommissionTotal ?? 0),
     rankCommissionTotal: Number(data.rankCommissionTotal ?? 0),
+    rankRewardActive: data.rankRewardActive === true,
+    rankRewardDaysPaid: Number(data.rankRewardDaysPaid ?? 0),
+    rankRewardTotalDays: Number(data.rankRewardTotalDays ?? 0),
+    completedRankRewardIds: Array.isArray(data.completedRankRewardIds)
+      ? (data.completedRankRewardIds as unknown[]).map(String)
+      : undefined,
+    rankCompensationSnapshot:
+      data.rankCompensationSnapshot != null && typeof data.rankCompensationSnapshot === 'object'
+        ? (data.rankCompensationSnapshot as RankCompensationSnapshot)
+        : undefined,
+    withdrawalPolicySnapshot:
+      data.withdrawalPolicySnapshot != null && typeof data.withdrawalPolicySnapshot === 'object'
+        ? (data.withdrawalPolicySnapshot as Record<string, unknown>)
+        : undefined,
     city: data.city != null ? String(data.city) : undefined,
     usdtBep20Address: data.usdtBep20Address != null ? String(data.usdtBep20Address) : undefined,
     transactionPinSet: Boolean(data.transactionPinHash),

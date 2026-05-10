@@ -15,6 +15,10 @@ function fmtDate(ms: number) {
 }
 
 function describeEntry(d: Record<string, unknown>) {
+  const tx = d.transactionType
+  if (typeof tx === 'string' && tx.trim()) return tx.trim()
+  const rn = d.rankName
+  if (typeof rn === 'string' && rn.trim()) return rn.trim()
   const desc = d.description
   if (typeof desc === 'string' && desc.trim()) return desc.trim()
   return 'Rank Income'

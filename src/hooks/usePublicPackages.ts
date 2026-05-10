@@ -32,9 +32,12 @@ export function usePublicPackages() {
     return onSnapshot(
       q,
       (snap) => {
-        const next: PublicPackageRow[] = snap.docs.map((docSnap) => {
+        const next: PublicPackageRow[] = []
+        for (const docSnap of snap.docs) {
           const x = docSnap.data() as Record<string, unknown>
-          return {
+          const shelf = String(x.packageShelf ?? 'investment').toLowerCase()
+          if (shelf === 'compounding') continue
+          next.push({
             id: docSnap.id,
             name: String(x.name ?? 'Package').trim() || 'Package',
             minAmount: Number(x.minAmount ?? 0),
@@ -43,8 +46,8 @@ export function usePublicPackages() {
             durationDays: Number(x.durationDays ?? 0),
             sortOrder: Number(x.sortOrder ?? 0),
             maxRoiMultiplier: Number(x.maxRoiMultiplier ?? 2),
-          }
-        })
+          })
+        }
         setPackages(sortPackages(next))
         setLoaded(true)
       },

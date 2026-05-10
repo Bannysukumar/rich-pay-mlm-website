@@ -104,7 +104,7 @@ export function InvestmentPlansPage() {
       h: 'Daily ROI',
       p: roiOff
         ? 'Daily accruals are currently disabled by the administrator.'
-        : `Accruals follow platform rules when enabled · UTC process hour: ${settings.roiProcessHourUtc ?? 0}.`,
+        : `Accruals follow platform rules when enabled · credited daily at 12:00 AM IST (Asia/Kolkata).`,
     })
     if (settings.publicPlansGuidelineExtra?.trim()) {
       items.push({
@@ -122,7 +122,6 @@ export function InvestmentPlansPage() {
     settings.minWithdrawal,
     settings.publicPlansGuidelineExtra,
     settings.roiEnabled,
-    settings.roiProcessHourUtc,
     settings.withdrawFeePercent,
   ])
 

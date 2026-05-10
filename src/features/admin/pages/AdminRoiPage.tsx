@@ -3,28 +3,31 @@ import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
-import { Input, Label } from '@/components/ui/Input'
 import { useLiveSiteConfig } from '@/hooks/admin/useLiveSiteConfig'
 
 export function AdminRoiPage() {
   const { data, ready, save } = useLiveSiteConfig()
   const [enabled, setEnabled] = useState(true)
-  const [hour, setHour] = useState('0')
+  const [rankOn, setRankOn] = useState(true)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (!ready) return
     setEnabled(data.roiEnabled !== false)
-    setHour(String(Number(data.roiProcessHourUtc ?? 0)))
+    setRankOn(data.rankRewardsEnabled !== false)
   }, [data, ready])
 
   const persist = async () => {
     setBusy(true)
     try {
-      await save({
-        roiEnabled: enabled,
-        roiProcessHourUtc: Math.min(23, Math.max(0, Number(hour || 0))),
-      })
+      await save(
+        {
+          roiEnabled: enabled,
+          rankRewardsEnabled: rankOn,
+        },
+        'adminRoiSchedule',
+        { bumpPlanVersion: true },
+      )
       toast.success('ROI schedule stored')
     } catch {
       toast.error('Save failed')
@@ -38,18 +41,21 @@ export function AdminRoiPage() {
       <div>
         <h1 className="font-display text-2xl text-zinc-100">ROI Settings</h1>
         <p className="text-sm text-zinc-500">
-          Scheduling metadata for the nightly Cloud Function cron. Computation still runs inside `processDailyRoi`.
+          Daily ROI credits run at{' '}
+          <strong className="text-zinc-300">12:00 AM IST</strong> (midnight{' '}
+          <code className="text-zinc-400">Asia/Kolkata</code>) via{' '}
+          <code className="text-zinc-400">processDailyRoi</code>. Changing the cron requires deploying Cloud Functions.
         </p>
       </div>
       <Card className="space-y-4 border-red-900/25 p-6">
         <label className="flex items-center gap-3 text-sm text-zinc-300">
           <input type="checkbox" className="accent-red-600" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          Accruals enabled globally
+          Daily ROI cron enabled (<code className="text-zinc-500">processDailyRoi</code>)
         </label>
-        <div>
-          <Label>Preferred processing hour (UTC)</Label>
-          <Input type="number" min={0} max={23} value={hour} onChange={(e) => setHour(e.target.value)} />
-        </div>
+        <label className="flex items-center gap-3 text-sm text-zinc-300">
+          <input type="checkbox" className="accent-red-600" checked={rankOn} onChange={(e) => setRankOn(e.target.checked)} />
+          Rank milestone payouts (<code className="text-zinc-500">processDailyRankRewards</code>)
+        </label>
         <Button type="button" variant="danger" disabled={busy || !ready} onClick={() => void persist()}>
           Save ROI cadence
         </Button>

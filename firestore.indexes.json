@@ -25,6 +25,14 @@
       ]
     },
     {
+      "collectionGroup": "activePackages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "internalTransfers",
       "queryScope": "COLLECTION",
       "fields": [

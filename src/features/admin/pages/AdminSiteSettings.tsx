@@ -21,7 +21,7 @@ export function AdminSiteSettings() {
     socialTelegram: '',
     socialTwitter: '',
     minDeposit: '50',
-    minWithdrawal: '25',
+    minWithdrawal: '10',
     withdrawFeePercent: '10',
     sponsorPercent: '5',
     teamLevelsCount: '30',
@@ -49,7 +49,7 @@ export function AdminSiteSettings() {
       socialTelegram: String(data.socialTelegram ?? ''),
       socialTwitter: String(data.socialTwitter ?? ''),
       minDeposit: String(data.minDeposit ?? 50),
-      minWithdrawal: String(data.minWithdrawal ?? 25),
+      minWithdrawal: String(data.minWithdrawal ?? 10),
       withdrawFeePercent: String(data.withdrawFeePercent ?? 10),
       sponsorPercent: String(data.sponsorPercent ?? 5),
       teamLevelsCount: String(data.teamLevelsCount ?? 30),
@@ -67,6 +67,11 @@ export function AdminSiteSettings() {
   const persist = async () => {
     setBusy(true)
     try {
+      const tlChanged = Number(form.teamLevelsCount) !== Number(data.teamLevelsCount ?? 30)
+      const spChanged = Number(form.sponsorPercent) !== Number(data.sponsorPercent ?? 5)
+      const wdChanged =
+        Number(form.minWithdrawal) !== Number(data.minWithdrawal ?? 10) ||
+        Number(form.withdrawFeePercent) !== Number(data.withdrawFeePercent ?? 10)
       await save(
         {
           maintenanceMode: form.maintenanceMode,
@@ -94,6 +99,10 @@ export function AdminSiteSettings() {
           publicContactFooterNote: form.publicContactFooterNote.trim(),
         },
         'adminSiteSettings',
+        {
+          bumpPlanVersion: tlChanged || spChanged,
+          bumpWithdrawPoliciesVersion: wdChanged,
+        },
       )
       toast.success('Site configuration saved — members see updates in real time')
     } catch {

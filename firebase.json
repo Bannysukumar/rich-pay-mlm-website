@@ -79,6 +79,10 @@
         "function": { "functionName": "adminBroadcastNotification", "region": "us-central1" }
       },
       {
+        "source": "/api/call/adminSeedCompensationDefaults",
+        "function": { "functionName": "adminSeedCompensationDefaults", "region": "us-central1" }
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

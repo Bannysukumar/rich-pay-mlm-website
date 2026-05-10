@@ -4,6 +4,7 @@ import type { FormEvent } from 'react'
 import toast from 'react-hot-toast'
 import { useAuthState } from '@/hooks/useAuth'
 import { useSiteSettings } from '@/hooks/useSiteSettings'
+import { DepositSettingsStrip } from '@/components/deposits/DepositSettingsStrip'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 
@@ -26,7 +27,7 @@ async function getLatestDepositTime(userId: string): Promise<number | null> {
 
 export function DepositCreatePage() {
   const { firebaseUid } = useAuthState()
-  const { settings } = useSiteSettings()
+  const { settings, loaded: settingsLoaded } = useSiteSettings()
   const [amount, setAmount] = useState('')
   const [busy, setBusy] = useState(false)
   const [view, setView] = useState<'form' | 'rateLimited'>('form')
@@ -90,6 +91,7 @@ export function DepositCreatePage() {
                   <h4 className="card-title mb-0">Deposit USDT</h4>
                 </div>
                 <div className="card-body">
+                  <DepositSettingsStrip settings={settings} settingsLoaded={settingsLoaded} showQrThumb />
                   <div className="basic-form">
                     <form name="form1" onSubmit={(ev) => void submit(ev)}>
                       <div className="mb-3 col-md-12">

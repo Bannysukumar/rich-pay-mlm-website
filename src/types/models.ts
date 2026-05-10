@@ -6,6 +6,24 @@ export interface UserWallets {
   cash: number
 }
 
+/** Frozen rows on the user from the latest package activation (rank / ratio / team matrix). */
+export type RankCompensationSnapshot = {
+  teamLevels?: unknown[]
+  ranks: Array<{
+    id: string
+    name: string
+    requiredTeamBusiness: number
+    dailyReward?: number
+    rewardDurationDays?: number
+    totalReward?: number
+    sortOrder?: number
+  }>
+  rankQualificationPowerPercent?: number
+  rankQualificationRestPercent?: number
+  planSettingsVersionAtCapture?: number
+  capturedAtMillis?: number
+}
+
 export interface UserProfile {
   uid: string
   username: string
@@ -22,12 +40,22 @@ export interface UserProfile {
   activeDirects: number
   currentRank: string
   totalTeamBusiness: number
+  powerTeamBusiness: number
+  restTeamBusiness: number
   nonWorkingIncomeBalance: number
   workingIncomeBalance: number
   sponsorBonusTotal: number
   dailyProfitsTotal: number
   teamLevelCommissionTotal: number
   rankCommissionTotal: number
+  /** Sequential rank reward drip (matches Cloud Functions scheduler). */
+  rankRewardActive?: boolean
+  rankRewardDaysPaid?: number
+  rankRewardTotalDays?: number
+  completedRankRewardIds?: string[]
+  rankCompensationSnapshot?: RankCompensationSnapshot | null
+  /** Copied from latest package activation for withdrawal validation / UI. */
+  withdrawalPolicySnapshot?: Record<string, unknown> | null
   /** Optional profile fields (Firestore) */
   city?: string
   usdtBep20Address?: string
@@ -84,6 +112,8 @@ export interface WithdrawRequest {
   createdAt: number
 }
 
+export type PackageShelf = 'investment' | 'compounding'
+
 export interface PackageDef {
   id: string
   name: string
@@ -92,9 +122,26 @@ export interface PackageDef {
   roiPercent: number
   durationDays: number
   active: boolean
+  /** Storefront lane: classic daily tiers vs Rich Compounding. */
+  packageShelf?: PackageShelf
   /** Lower sorts first when listing packages for members (admin-managed). */
   sortOrder?: number
+  /** Non-working ROI ceiling as multiple of principal (PDF: 2× = 200%). */
+  maxRoiMultiplier?: number
 }
+
+/** Admin-configurable per-tier withdrawal cap (Firestore `withdrawPackageCaps` on siteSettings/config). */
+export type WithdrawPackageCapRow = {
+  packageAmount: number
+  maxWithdrawal: number
+  usePercentFormula: boolean
+  percentOfPackage: number
+  active: boolean
+  sortOrder: number
+}
+
+/** Immutable capture at activation — all accruals use this + top-level frozen multipliers. */
+export type PlanActivationSnapshot = Record<string, unknown>
 
 export interface ActivePackage {
   id: string
@@ -106,8 +153,12 @@ export interface ActivePackage {
   startedAt: number
   endsAt: number
   nonWorkingPaid: number
+  /** Cumulative sponsor + team-level payouts applied toward the 3× working cap for this activation. */
   workingPaid: number
   status: 'active' | 'completed' | 'capped'
+  frozenNonWorkingCapMultiplier?: number
+  frozenWorkingCapMultiplier?: number
+  planSnapshot?: PlanActivationSnapshot
 }
 
 export interface SiteSettings {
@@ -129,6 +180,32 @@ export interface SiteSettings {
   withdrawFeePercent: number
   sponsorPercent: number
   teamLevelsCount: number
+  /** Bumps when admin changes compensation rules affecting new activations (optional). */
+  planSettingsVersion?: number
+  /** Non-working (daily ROI) payout cap as multiple of principal (default 2). */
+  nonWorkingIncomeCapMultiplier?: number
+  /** Working (sponsor + team) payout cap as multiple of activation amount (default 3). */
+  workingIncomeCapMultiplier?: number
+  /** Gate member withdrawal requests (`createWithdrawal`). */
+  withdrawalsEnabled?: boolean
+  withdrawNetworkLabel?: string
+  /** IANA TZ for withdrawal window (e.g. Etc/UTC, Asia/Kolkata). */
+  withdrawalWindowTimezone?: string
+  withdrawalWindowStart?: string
+  withdrawalWindowEnd?: string
+  withdrawalRequiresActivePackage?: boolean
+  withdrawalProcessingIntervalHours?: number
+  withdrawalProcessingMode?: 'manual' | 'auto'
+  defaultWithdrawalPercentOfPackage?: number
+  withdrawPackageCaps?: WithdrawPackageCapRow[]
+  withdrawPoliciesVersion?: number
+  lastAutoWithdrawalRunAt?: number
+  /** When false, skips `processDailyRankRewards` scheduler. */
+  rankRewardsEnabled?: boolean
+  /** Power-leg share of total team business required for rank milestones (paired with Rest). Default 50. */
+  rankQualificationPowerPercent?: number
+  /** Rest-leg share for rank milestones. Default 50. */
+  rankQualificationRestPercent?: number
   /** Global ROI cron / accruals flag (cron still needed server-side). */
   roiEnabled?: boolean
   roiProcessHourUtc?: number

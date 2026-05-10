@@ -1,4 +1,4 @@
-import { doc, onSnapshot, setDoc } from 'firebase/firestore'
+import { doc, increment, onSnapshot, setDoc } from 'firebase/firestore'
 import { useCallback, useEffect, useState } from 'react'
 import { pushAuditLog } from '@/lib/admin/pushAuditLog'
 import { COLLECTIONS } from '@/lib/constants'
@@ -22,8 +22,15 @@ export function useLiveSiteConfig() {
   [])
 
   const save = useCallback(
-    async (patch: Record<string, unknown>, auditAction = 'adminSiteConfigPatch') => {
-      await setDoc(ref, { ...patch, updatedAt: Date.now() }, { merge: true })
+    async (
+      patch: Record<string, unknown>,
+      auditAction = 'adminSiteConfigPatch',
+      opts?: { bumpPlanVersion?: boolean; bumpWithdrawPoliciesVersion?: boolean },
+    ) => {
+      const payload: Record<string, unknown> = { ...patch, updatedAt: Date.now() }
+      if (opts?.bumpPlanVersion) payload.planSettingsVersion = increment(1)
+      if (opts?.bumpWithdrawPoliciesVersion) payload.withdrawPoliciesVersion = increment(1)
+      await setDoc(ref, payload, { merge: true })
       await pushAuditLog(auditAction, patch)
     },
     [ref],

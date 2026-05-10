@@ -19,7 +19,7 @@ export function AdminSponsorPage() {
   const persist = async () => {
     setBusy(true)
     try {
-      await save({ sponsorPercent: Number(pct || 0) })
+      await save({ sponsorPercent: Number(pct || 0) }, 'adminSponsorPercent', { bumpPlanVersion: true })
       toast.success('Direct sponsor incentive updated instantly on activations.')
     } catch {
       toast.error('Save failed')

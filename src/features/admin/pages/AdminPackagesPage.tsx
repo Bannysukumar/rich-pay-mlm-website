@@ -15,20 +15,39 @@ import toast from 'react-hot-toast'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input, Label } from '@/components/ui/Input'
+import { bumpPlanSettingsVersion } from '@/lib/admin/bumpPlanSettingsVersion'
+import { getHttpsCallable } from '@/lib/api/httpsCallableHelper'
 import { pushAuditLog } from '@/lib/admin/pushAuditLog'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
-import type { PackageDef } from '@/types/models'
+import { cn } from '@/lib/utils/cn'
+import type { PackageDef, PackageShelf } from '@/types/models'
+
+/** Matches RICH PAY PDF five fixed tiers (investment / daily lane). */
+const PDF_PLAN_TIERS_SEED: Array<{
+  name: string
+  minAmount: number
+  maxAmount: number
+  roiPercent: number
+  durationDays: number
+  maxRoiMultiplier: number
+  sortOrder: number
+}> = [
+  { name: 'Tier 1', minAmount: 100, maxAmount: 100, roiPercent: 1, durationDays: 200, maxRoiMultiplier: 2, sortOrder: 10 },
+  { name: 'Tier 2', minAmount: 200, maxAmount: 200, roiPercent: 2, durationDays: 100, maxRoiMultiplier: 2, sortOrder: 20 },
+  { name: 'Tier 3', minAmount: 300, maxAmount: 300, roiPercent: 3, durationDays: 66, maxRoiMultiplier: 2, sortOrder: 30 },
+  { name: 'Tier 4', minAmount: 400, maxAmount: 400, roiPercent: 4, durationDays: 50, maxRoiMultiplier: 2, sortOrder: 40 },
+  { name: 'Tier 5', minAmount: 500, maxAmount: 500, roiPercent: 5, durationDays: 40, maxRoiMultiplier: 2, sortOrder: 50 },
+]
 
 type Row = PackageDef & {
   description?: string
-  sortOrder?: number
-  maxRoiMultiplier?: number
 }
 
 export function AdminPackagesPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [busy, setBusy] = useState(false)
+  const [shelfTab, setShelfTab] = useState<Exclude<PackageShelf, undefined>>('investment')
 
   useEffect(() => {
     const q = query(collection(db, COLLECTIONS.packages), limit(200))
@@ -36,6 +55,8 @@ export function AdminPackagesPage() {
       const next: Row[] = []
       snap.forEach((ds) => {
         const d = ds.data() as Record<string, unknown>
+        const shelfRaw = String(d.packageShelf ?? 'investment').toLowerCase()
+        const packageShelf: PackageShelf = shelfRaw === 'compounding' ? 'compounding' : 'investment'
         next.push({
           id: ds.id,
           name: String(d.name ?? ''),
@@ -47,12 +68,37 @@ export function AdminPackagesPage() {
           description: d.description != null ? String(d.description) : '',
           sortOrder: Number(d.sortOrder ?? 0),
           maxRoiMultiplier: Number(d.maxRoiMultiplier ?? 2),
+          packageShelf,
         })
       })
       next.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
       setRows(next)
     })
   }, [])
+
+  const visibleRows = useMemo(() => {
+    return rows.filter((r) =>
+      shelfTab === 'compounding'
+        ? (r.packageShelf ?? 'investment') === 'compounding'
+        : (r.packageShelf ?? 'investment') !== 'compounding',
+    )
+  }, [rows, shelfTab])
+
+  const blank = useMemo(
+    (): Omit<Row, 'id'> => ({
+      name: '',
+      minAmount: 0,
+      maxAmount: 0,
+      roiPercent: 0,
+      durationDays: 30,
+      active: true,
+      description: '',
+      sortOrder: rows.length ? Math.max(...rows.map((r) => r.sortOrder ?? 0)) + 10 : 0,
+      maxRoiMultiplier: 2,
+      packageShelf: shelfTab,
+    }),
+    [rows, shelfTab],
+  )
 
   const persist = useCallback(async (maybeId: string | undefined, data: Omit<Row, 'id'>) => {
     setBusy(true)
@@ -67,6 +113,7 @@ export function AdminPackagesPage() {
         description: String(data.description ?? ''),
         sortOrder: Number(data.sortOrder ?? 0),
         maxRoiMultiplier: Number(data.maxRoiMultiplier ?? 2),
+        packageShelf: data.packageShelf ?? 'investment',
         updatedAt: serverTimestamp(),
       }
       if (maybeId) {
@@ -79,6 +126,7 @@ export function AdminPackagesPage() {
         })
         await pushAuditLog('adminPackageCreate', { id: ref.id, payload })
       }
+      await bumpPlanSettingsVersion()
       toast.success(maybeId ? 'Package saved' : 'Package created')
     } catch {
       toast.error('Save failed — check indexes or permissions')
@@ -92,38 +140,145 @@ export function AdminPackagesPage() {
     try {
       await deleteDoc(doc(db, COLLECTIONS.packages, id))
       await pushAuditLog('adminPackageDelete', { id })
+      await bumpPlanSettingsVersion()
       toast.success('Package removed')
     } catch {
       toast.error('Delete failed')
     }
   }
 
-  const blank = useMemo(
-    (): Omit<Row, 'id'> => ({
-      name: '',
-      minAmount: 0,
-      maxAmount: 0,
-      roiPercent: 0,
-      durationDays: 30,
-      active: true,
-      description: '',
-      sortOrder: rows.length ? Math.max(...rows.map((r) => r.sortOrder ?? 0)) + 10 : 0,
-      maxRoiMultiplier: 2,
-    }),
-    [rows],
-  )
+  const seedPdfTiers = async () => {
+    if (!window.confirm('Add the five canonical PDF tiers (skip any amount already published)?')) return
+    setBusy(true)
+    try {
+      let n = 0
+      for (const t of PDF_PLAN_TIERS_SEED) {
+        const exists = rows.some((r) => r.minAmount === t.minAmount && r.maxAmount === t.maxAmount)
+        if (exists) continue
+        await addDoc(collection(db, COLLECTIONS.packages), {
+          name: t.name,
+          minAmount: t.minAmount,
+          maxAmount: t.maxAmount,
+          roiPercent: t.roiPercent,
+          durationDays: t.durationDays,
+          active: true,
+          packageShelf: 'investment',
+          description: `Total return ${t.maxRoiMultiplier * 100}% · PDF tier`,
+          sortOrder: t.sortOrder,
+          maxRoiMultiplier: t.maxRoiMultiplier,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+        n++
+      }
+      await pushAuditLog('adminPackageSeedPdfTiers', { added: n })
+      await bumpPlanSettingsVersion()
+      toast.success(n ? `Inserted ${n} package(s)` : 'All PDF tiers already exist')
+    } catch {
+      toast.error('Seed failed — check Firestore permissions')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const seedRichCompounding = async () => {
+    if (!window.confirm('Insert Rich Compounding reference tiers (missing document IDs only)?')) return
+    setBusy(true)
+    try {
+      const fn = getHttpsCallable('adminSeedCompensationDefaults')
+      const res = await fn({
+        seedTeamLevels: false,
+        seedRanks: false,
+        seedCompoundPlans: true,
+      })
+      const out = res.data as { compoundPlansInserted?: number }
+      await bumpPlanSettingsVersion()
+      toast.success(out?.compoundPlansInserted != null ? `Inserted ${out.compoundPlansInserted}` : 'Compounding seed done')
+    } catch {
+      toast.error('Compound seed failed — deploy functions / admin login')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const cloneRow = async (r: Row) => {
+    setBusy(true)
+    try {
+      const ref = await addDoc(collection(db, COLLECTIONS.packages), {
+        name: `${r.name} (copy)`,
+        minAmount: r.minAmount,
+        maxAmount: r.maxAmount,
+        roiPercent: r.roiPercent,
+        durationDays: r.durationDays,
+        active: r.active,
+        packageShelf: r.packageShelf ?? 'investment',
+        description: `${r.description ?? ''} cloned`,
+        sortOrder: (r.sortOrder ?? 0) + 1,
+        maxRoiMultiplier: r.maxRoiMultiplier ?? 2,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+      await pushAuditLog('adminPackageClone', { from: r.id, to: ref.id })
+      await bumpPlanSettingsVersion()
+      toast.success('Package cloned — edit fields as needed')
+    } catch {
+      toast.error('Clone failed')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="font-display text-2xl text-zinc-100">Package Management</h1>
-        <p className="text-sm text-zinc-500">Publishing here updates live quoting on the dashboard instantly.</p>
+        <p className="text-sm text-zinc-500">
+          Separate lanes for classic investment tiers and Rich Compounding. Saves bump{' '}
+          <code className="text-zinc-600">planSettingsVersion</code> for snapshot correlation.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2 border-b border-red-950/35 pb-2">
+          <button
+            type="button"
+            className={cn(
+              'rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-wide',
+              shelfTab === 'investment'
+                ? 'bg-red-700/85 text-white'
+                : 'text-zinc-500 hover:bg-zinc-900/80',
+            )}
+            onClick={() => setShelfTab('investment')}
+          >
+            Investment (daily ROI)
+          </button>
+          <button
+            type="button"
+            className={cn(
+              'rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-wide',
+              shelfTab === 'compounding'
+                ? 'bg-red-700/85 text-white'
+                : 'text-zinc-500 hover:bg-zinc-900/80',
+            )}
+            onClick={() => setShelfTab('compounding')}
+          >
+            Rich Compounding
+          </button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {shelfTab === 'investment' ? (
+            <Button type="button" variant="outline" disabled={busy} onClick={() => void seedPdfTiers()}>
+              Seed PDF five tiers ($100–$500)
+            </Button>
+          ) : (
+            <Button type="button" variant="outline" disabled={busy} onClick={() => void seedRichCompounding()}>
+              Seed reference compounding tiers ($500–$100)
+            </Button>
+          )}
+        </div>
       </div>
 
       <PackageForm title="Publish new tier" initial={blank} busy={busy} onSubmit={(data) => void persist(undefined, data)} />
 
       <div className="space-y-4">
-        {rows.map((r) => (
+        {visibleRows.map((r) => (
           <PackageForm
             key={r.id}
             title={`Tier · ${r.name || r.id}`}
@@ -131,13 +286,21 @@ export function AdminPackagesPage() {
             initial={r}
             busy={busy}
             footer={
-              <Button type="button" variant="outline" className="text-[11px]" onClick={() => void remove(r.id)}>
-                Archive / delete tier
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" className="text-[11px]" onClick={() => void cloneRow(r)}>
+                  Clone
+                </Button>
+                <Button type="button" variant="outline" className="text-[11px]" onClick={() => void remove(r.id)}>
+                  Archive / delete tier
+                </Button>
+              </div>
             }
             onSubmit={(data) => void persist(r.id, data)}
           />
         ))}
+        {visibleRows.length === 0 && (
+          <p className="text-sm text-zinc-600">No packages in this lane yet — publish above or run a seed helper.</p>
+        )}
       </div>
     </div>
   )
@@ -190,6 +353,16 @@ function PackageForm({
         <Field label="Marketing name">
           <Input value={f.name} onChange={(e) => set('name')(e.target.value)} />
         </Field>
+        <Field label="Lane">
+          <select
+            className="w-full rounded-xl border border-zinc-900 bg-black/55 px-3 py-2 text-xs text-zinc-200 outline-none ring-red-900/50 focus:border-red-800"
+            value={f.packageShelf ?? 'investment'}
+            onChange={(e) => set('packageShelf')(e.target.value as PackageShelf)}
+          >
+            <option value="investment">Investment (daily ROI)</option>
+            <option value="compounding">Rich Compounding</option>
+          </select>
+        </Field>
         <Field label="Sort order">
           <Input type="number" value={f.sortOrder ?? 0} onChange={(e) => set('sortOrder')(Number(e.target.value))} />
         </Field>
@@ -199,8 +372,8 @@ function PackageForm({
         <Field label="Max amount (USDT)">
           <Input type="number" value={f.maxAmount} onChange={(e) => set('maxAmount')(Number(e.target.value))} />
         </Field>
-        <Field label="ROI % (daily reference)">
-          <Input type="number" step="0.01" value={f.roiPercent} onChange={(e) => set('roiPercent')(Number(e.target.value))} />
+        <Field label={f.packageShelf === 'compounding' ? 'ROI % (compounding curve)' : 'ROI % (daily reference)'}>
+          <Input type="number" step="0.0001" value={f.roiPercent} onChange={(e) => set('roiPercent')(Number(e.target.value))} />
         </Field>
         <Field label="Duration (days)">
           <Input type="number" value={f.durationDays} onChange={(e) => set('durationDays')(Number(e.target.value))} />

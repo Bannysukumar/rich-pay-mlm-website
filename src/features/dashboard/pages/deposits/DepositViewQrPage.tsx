@@ -1,6 +1,7 @@
 import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore'
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
+import { DepositSettingsStrip } from '@/components/deposits/DepositSettingsStrip'
 import { useAuthState } from '@/hooks/useAuth'
 import { useSiteSettings } from '@/hooks/useSiteSettings'
 import { COLLECTIONS } from '@/lib/constants'
@@ -99,6 +100,7 @@ export function DepositViewQrPage() {
                 <h4 className="card-title mb-0">View QR</h4>
               </div>
               <div className="card-body">
+                <DepositSettingsStrip settings={settings} settingsLoaded={settingsLoaded} showQrThumb />
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">
                     <thead>
@@ -179,9 +181,15 @@ export function DepositViewQrPage() {
                 <button type="button" className="btn-close btn-close-white" aria-label="Close" onClick={() => setQrFor(null)} />
               </div>
               <div className="modal-body text-center">
-                <p className="small text-secondary mb-3">
-                  {settings.depositNetwork} · Invoice {qrFor.amount} {settings.currencyLabel ?? 'USDT'}
+                <p className="small text-secondary mb-2">
+                  {settings.depositNetwork} · Invoice {qrFor.amount} {settings.currencyLabel ?? 'USDT'} · Min deposit{' '}
+                  {settings.minDeposit}
                 </p>
+                {settings.depositInstructions ? (
+                  <p className="small text-start text-secondary mb-3" style={{ whiteSpace: 'pre-wrap' }}>
+                    {settings.depositInstructions}
+                  </p>
+                ) : null}
                 {!settingsLoaded ? (
                   <p className="small text-secondary">Loading deposit settings…</p>
                 ) : hasQrImage ? (

@@ -6,11 +6,86 @@ import { CopySimple, Link as LinkIcon } from '@phosphor-icons/react'
 import toast from 'react-hot-toast'
 import { useAuthState } from '@/hooks/useAuth'
 import { useSiteSettings } from '@/hooks/useSiteSettings'
+import type { UserProfile } from '@/types/models'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
+import {
+  computeMaxWithdrawForPrincipal,
+  fmtNextAutoSummary,
+  isWithinWithdrawalWindow,
+  livePolicyFromSiteSettings,
+  mergeWithdrawPolicy,
+} from '@/lib/withdrawPolicy'
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
+}
+
+function normalizePowerRest(pRaw: number, rRaw: number): { p: number; r: number } {
+  let p = Math.max(0, pRaw)
+  let r = Math.max(0, rRaw)
+  const s = p + r
+  if (!Number.isFinite(s) || s <= 0) return { p: 50, r: 50 }
+  return { p: (p / s) * 100, r: (r / s) * 100 }
+}
+
+function computeRankHud(profile: UserProfile, livePowerPct?: number, liveRestPct?: number) {
+  const snap = profile.rankCompensationSnapshot
+  const fallbackP = normalizePowerRest(
+    Number(livePowerPct ?? 50),
+    Number(liveRestPct ?? 50),
+  )
+  let pPct = fallbackP.p
+  let rPct = fallbackP.r
+  const ranksRaw = snap?.ranks?.length ? snap.ranks : null
+  if (snap?.rankQualificationPowerPercent != null && snap.rankQualificationRestPercent != null) {
+    const n = normalizePowerRest(
+      Number(snap.rankQualificationPowerPercent),
+      Number(snap.rankQualificationRestPercent),
+    )
+    pPct = n.p
+    rPct = n.r
+  }
+  const completed = new Set(profile.completedRankRewardIds ?? [])
+  const ordered =
+    ranksRaw?.slice().sort((a, b) => {
+      const so = Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0)
+      return so !== 0
+        ? so
+        : Number(a.requiredTeamBusiness ?? 0) - Number(b.requiredTeamBusiness ?? 0)
+    }) ?? []
+
+  const nextIncomplete = ordered.find((rk) => !completed.has(String(rk.id)))
+
+  let nextLine = ''
+  let progressPct = 0
+  if (nextIncomplete) {
+    const req = Number(nextIncomplete.requiredTeamBusiness ?? 0)
+    const needP = (req * pPct) / 100
+    const needR = (req * rPct) / 100
+    const tb = profile.totalTeamBusiness
+    const pb = profile.powerTeamBusiness
+    const rb = profile.restTeamBusiness
+    const tRatio = req > 0 ? Math.min(1, tb / req) : 1
+    const pRatio = needP > 1e-9 ? Math.min(1, pb / needP) : 1
+    const rRatio = needR > 1e-9 ? Math.min(1, rb / needR) : 1
+    progressPct = Math.round(Math.min(tRatio, pRatio, rRatio) * 100)
+    nextLine = `Next: ${nextIncomplete.name} — team $${fmt(tb)} / $${fmt(req)} · power $${fmt(pb)} / $${fmt(needP)} · rest $${fmt(rb)} / $${fmt(needR)}`
+  } else if (ordered.length > 0) {
+    nextLine = 'All configured ranks in your snapshot are completed.'
+    progressPct = 100
+  } else {
+    nextLine = 'Activate a package to capture the rank ladder for your account.'
+  }
+
+  let dripLine = ''
+  if (profile.rankRewardActive && (profile.rankRewardTotalDays ?? 0) > 0) {
+    const paid = Math.min(profile.rankRewardDaysPaid ?? 0, profile.rankRewardTotalDays ?? 0)
+    const total = profile.rankRewardTotalDays ?? 0
+    dripLine = `Ranking bonus schedule: day ${paid} of ${total} (${profile.currentRank})`
+  }
+
+  return { nextLine, progressPct, dripLine, powerPct: pPct, restPct: rPct }
 }
 
 function referralBase(): string {
@@ -28,6 +103,7 @@ export function DashboardHome() {
   const { profile, firebaseUid } = useAuthState()
   const { settings } = useSiteSettings()
   const [activePackageTotal, setActivePackageTotal] = useState<number | undefined>(undefined)
+  const [maxActivePrincipal, setMaxActivePrincipal] = useState<number | undefined>(undefined)
 
   const refLink = useMemo(() => {
     if (!profile?.username) return ''
@@ -38,6 +114,7 @@ export function DashboardHome() {
   useEffect(() => {
     if (!firebaseUid) {
       setActivePackageTotal(undefined)
+      setMaxActivePrincipal(undefined)
       return
     }
     const q = query(
@@ -49,20 +126,53 @@ export function DashboardHome() {
       q,
       (snap) => {
         let sum = 0
+        let maxOne = 0
         snap.forEach((doc) => {
           const d = doc.data()
           if (String(d.status ?? 'active').toLowerCase() === 'active') {
-            sum += Number(d.amount ?? 0)
+            const amt = Number(d.amount ?? 0)
+            sum += amt
+            maxOne = Math.max(maxOne, amt)
           }
         })
         setActivePackageTotal(sum)
+        setMaxActivePrincipal(maxOne)
       },
       () => {
         setActivePackageTotal(0)
+        setMaxActivePrincipal(0)
         toast.error('Could not load active package total')
       },
     )
   }, [firebaseUid])
+
+  const withdrawalPolicyMerged = useMemo(
+    () =>
+      mergeWithdrawPolicy(livePolicyFromSiteSettings(settings), profile?.withdrawalPolicySnapshot ?? undefined),
+    [settings, profile?.withdrawalPolicySnapshot],
+  )
+
+  const maxWithdrawThisCycle = useMemo(() => {
+    if (withdrawalPolicyMerged.withdrawalRequiresActivePackage === false)
+      return Number.POSITIVE_INFINITY
+    const mx = maxActivePrincipal ?? 0
+    if (mx <= 0) return 0
+    return computeMaxWithdrawForPrincipal(mx, withdrawalPolicyMerged)
+  }, [withdrawalPolicyMerged, maxActivePrincipal])
+
+  const withdrawWindowOpen = useMemo(
+    () => isWithinWithdrawalWindow(withdrawalPolicyMerged),
+    [withdrawalPolicyMerged],
+  )
+
+  const rankHud = useMemo(() => {
+    if (!profile) return null
+    return computeRankHud(
+      profile,
+      settings.rankQualificationPowerPercent,
+      settings.rankQualificationRestPercent,
+    )
+  }, [profile, settings.rankQualificationPowerPercent, settings.rankQualificationRestPercent])
 
   const copy = async () => {
     if (!refLink) return
@@ -104,11 +214,23 @@ export function DashboardHome() {
   const sponsorPct = settings.sponsorPercent
   const teamLevels = settings.teamLevelsCount
 
+  const feePct = Number(withdrawalPolicyMerged.withdrawFeePercent ?? settings.withdrawFeePercent)
+  const minWd = Number(withdrawalPolicyMerged.minWithdrawal ?? settings.minWithdrawal)
+  const capLine =
+    !Number.isFinite(maxWithdrawThisCycle)
+      ? 'No per-request cap (policy)'
+      : maxWithdrawThisCycle <= 0
+        ? 'Max per request: — (activate a package first)'
+        : `Max per request: $ ${fmt(maxWithdrawThisCycle)}`
+
   type Stat = { label: string; value: string; tone: 'warning' | 'primary' | 'danger' | 'success' }
   const row1: Stat[] = [
     {
-      label: 'Your Package (active)',
-      value: activePackageTotal === undefined ? '$ …' : `$ ${fmt(activePackageTotal)}`,
+      label: 'Your Package (active · largest stake)',
+      value:
+        activePackageTotal === undefined || maxActivePrincipal === undefined
+          ? '$ …'
+          : `$ ${fmt(activePackageTotal)} total · max $ ${fmt(maxActivePrincipal)}`,
       tone: 'warning',
     },
     { label: 'Cash Wallet', value: `$ ${fmt(profile.wallets.cash)}`, tone: 'primary' },
@@ -118,10 +240,11 @@ export function DashboardHome() {
   ]
 
   const row2: Stat[] = [
-    { label: 'Active Directs', value: String(profile.activeDirects), tone: 'primary' },
+    { label: 'Active Directs (with package)', value: String(profile.activeDirects), tone: 'primary' },
     { label: 'Sponsor Bonus', value: `$ ${fmt(profile.sponsorBonusTotal)}`, tone: 'danger' },
     { label: 'Daily Profits', value: `$ ${fmt(profile.dailyProfitsTotal)}`, tone: 'warning' },
     { label: 'Team Level Commission', value: `$ ${fmt(profile.teamLevelCommissionTotal)}`, tone: 'success' },
+    { label: 'Ranking Bonus (total)', value: `$ ${fmt(profile.rankCommissionTotal)}`, tone: 'success' },
   ]
 
   const row3: Stat[] = [
@@ -139,7 +262,17 @@ export function DashboardHome() {
 
   const row4: Stat[] = [
     { label: 'Total Team Business', value: `$ ${fmt(profile.totalTeamBusiness)}`, tone: 'primary' },
-    { label: 'Rank', value: profile.currentRank, tone: 'danger' },
+    {
+      label: 'Power team business',
+      value: `$ ${fmt(profile.powerTeamBusiness)}`,
+      tone: 'primary',
+    },
+    {
+      label: 'Rest team business',
+      value: `$ ${fmt(profile.restTeamBusiness)}`,
+      tone: 'primary',
+    },
+    { label: 'Current rank', value: profile.currentRank, tone: 'danger' },
   ]
 
   const toneBg: Record<Stat['tone'], string> = {
@@ -249,15 +382,76 @@ export function DashboardHome() {
       </div>
 
       <StatGrid items={row1} />
+      <div className="row mt-3 mb-2">
+        <div className="col-12">
+          <div className="alert alert-secondary border mb-0" style={{ borderColor: 'rgba(212,175,55,0.25)' }}>
+            <strong style={{ color: '#d4af37' }}>Withdrawals</strong>
+            <span className={`ms-2 small ${withdrawalPolicyMerged.withdrawalsEnabled !== false ? 'text-success' : 'text-danger'}`}>
+              {withdrawalPolicyMerged.withdrawalsEnabled !== false ? 'enabled' : 'disabled'}
+            </span>
+            <div className="small mt-2 mb-0" style={{ color: '#ccc' }}>
+              Network: <strong className="text-light">{String(withdrawalPolicyMerged.withdrawNetworkLabel ?? settings.depositNetwork)}</strong>
+              {' · '}
+              Fee: <strong className="text-light">{feePct}%</strong>
+              {' · '}
+              Min: <strong className="text-light">${fmt(minWd)}</strong>
+            </div>
+            <div className="small mt-1 mb-0" style={{ color: '#aaa' }}>
+              {capLine}
+              {' · '}
+              Window ({String(withdrawalPolicyMerged.withdrawalWindowTimezone ?? 'Etc/UTC')}):{' '}
+              <strong className="text-light">
+                {String(withdrawalPolicyMerged.withdrawalWindowStart)} – {String(withdrawalPolicyMerged.withdrawalWindowEnd)}
+              </strong>
+              {' — '}
+              {withdrawWindowOpen ? (
+                <span className="text-success">open now</span>
+              ) : (
+                <span className="text-warning">closed now</span>
+              )}
+            </div>
+            <p className="small mt-2 mb-0 text-secondary">{fmtNextAutoSummary(settings)}</p>
+          </div>
+        </div>
+      </div>
       <div className="mt-2">
         <StatGrid items={row2} />
       </div>
       <div className="mt-2">
         <StatGrid items={row3} />
       </div>
-      <div className="mt-2 mb-5">
+      <div className="mt-2">
         <StatGrid items={row4} />
       </div>
+
+      {rankHud ? (
+        <section className="mt-4 mb-5 rounded-3 border border-secondary p-4" style={{ borderColor: 'rgba(212,175,55,0.2)' }}>
+          <h3 className="mb-2" style={{ color: '#d4af37', fontWeight: 600 }}>
+            Rank progress
+          </h3>
+          <p className="small mb-2" style={{ color: '#aaa' }}>
+            Qualification uses {rankHud.powerPct.toFixed(0)}% power / {rankHud.restPct.toFixed(0)}% rest of your team
+            business target (from your activation snapshot when available).
+          </p>
+          {rankHud.dripLine ? (
+            <p className="small mb-2 text-success" style={{ fontWeight: 600 }}>
+              {rankHud.dripLine}
+            </p>
+          ) : null}
+          <div className="mb-2" style={{ height: 8, background: '#333', borderRadius: 4, overflow: 'hidden' }}>
+            <div
+              style={{
+                width: `${Math.min(100, Math.max(0, rankHud.progressPct))}%`,
+                height: '100%',
+                background: 'linear-gradient(90deg,#d4af37,#8b6914)',
+              }}
+            />
+          </div>
+          <p className="small mb-0" style={{ color: '#ccc' }}>
+            {rankHud.nextLine}
+          </p>
+        </section>
+      ) : null}
     </main>
   )
 }

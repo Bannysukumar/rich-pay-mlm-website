@@ -55,7 +55,7 @@ const groups: { title: string; items: NavItem[] }[] = [
   {
     title: 'Operations',
     items: [
-      { to: '/admin/wallets', label: 'Wallets', icon: IconWallet },
+      { to: '/admin/wallets', label: 'Wallets / withdrawals', icon: IconWallet },
       { to: '/admin/qr', label: 'QR & address', icon: IconQrcode },
       { to: '/admin/transfers', label: 'Transfers', icon: IconTransfer },
       { to: '/admin/tickets', label: 'Tickets', icon: IconTicket },
