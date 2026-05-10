@@ -75,6 +75,10 @@
         "function": { "functionName": "adminFinalizeDeposit", "region": "us-central1" }
       },
       {
+        "source": "/api/call/adminRepairWalletShadowFields",
+        "function": { "functionName": "adminRepairWalletShadowFields", "region": "us-central1" }
+      },
+      {
         "source": "/api/call/adminBroadcastNotification",
         "function": { "functionName": "adminBroadcastNotification", "region": "us-central1" }
       },

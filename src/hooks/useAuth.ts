@@ -8,12 +8,30 @@ import { auth, db } from '@/lib/firebase'
 import { COLLECTIONS } from '@/lib/constants'
 import type { RankCompensationSnapshot, UserProfile } from '@/types/models'
 
+/**
+ * Legacy bug: some user docs have a stray top-level segment `wallets.deposit` created by
+ * `set(..., { merge: true })` writes. The real map is `wallets.{deposit,activation,cash}`.
+ * Sum nested + stray so the UI matches server intent until `adminRepairWalletShadowFields` runs.
+ */
+function mergedWalletLeaf(
+  raw: Record<string, unknown> | null | undefined,
+  data: Record<string, unknown>,
+  key: 'deposit' | 'activation' | 'cash',
+): number {
+  const nest = Number(raw?.[key] ?? 0)
+  const shadowKey = `wallets.${key}`
+  const shadowRaw = data[shadowKey]
+  const shadow =
+    typeof shadowRaw === 'number' && Number.isFinite(shadowRaw) ? shadowRaw : Number(shadowRaw ?? 0) || 0
+  return nest + shadow
+}
+
 function mapUserDoc(uid: string, data: Record<string, unknown>): UserProfile {
   const raw = data.wallets as Record<string, unknown> | null | undefined
   const w: UserProfile['wallets'] = {
-    deposit: Number(raw?.deposit ?? 0),
-    activation: Number(raw?.activation ?? 0),
-    cash: Number(raw?.cash ?? 0),
+    deposit: mergedWalletLeaf(raw, data, 'deposit'),
+    activation: mergedWalletLeaf(raw, data, 'activation'),
+    cash: mergedWalletLeaf(raw, data, 'cash'),
   }
   return {
     uid,

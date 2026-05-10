@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
+exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
 const node_crypto_1 = require("node:crypto");
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -262,7 +262,7 @@ async function payWorkingIncomeForActivation(activePackageId, beneficiaryUid, am
             payload.sponsorBonusTotal = firestore_1.FieldValue.increment(payAmt);
         else
             payload.teamLevelCommissionTotal = firestore_1.FieldValue.increment(payAmt);
-        await db.collection(COL_USERS).doc(uid).set(payload, { merge: true });
+        await db.collection(COL_USERS).doc(uid).update(payload);
         await db.collection(bonusColl).add({
             ...bonusDoc,
             amount: payAmt,
@@ -488,14 +488,14 @@ async function processRankRewardForUser(uid, dayKey) {
             transactionType: 'Ranking Bonus',
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
-        await ref.set({
+        await ref.update({
             'wallets.cash': firestore_1.FieldValue.increment(daily),
             rankCommissionTotal: firestore_1.FieldValue.increment(daily),
             workingIncomeBalance: firestore_1.FieldValue.increment(daily),
             rankRewardDaysPaid: nextDay,
             rankRewardLastPaidDayKey: dayKey,
             updatedAt: Date.now(),
-        }, { merge: true });
+        });
         if (nextDay >= totalDays) {
             await finalizeRankSchedule(uid, rankId);
             await tryStartNextRankSchedule(uid);
@@ -1483,10 +1483,10 @@ exports.adminFinalizeDeposit = (0, https_1.onCall)(callableRuntimeOpts, async (r
             return 0;
         }
         if (!alreadyCredited) {
-            tx.set(userRef, {
+            tx.update(userRef, {
                 'wallets.deposit': firestore_1.FieldValue.increment(amount),
                 updatedAt: Date.now(),
-            }, { merge: true });
+            });
         }
         if (cur === 'pending') {
             tx.update(depRef, {
@@ -1519,6 +1519,47 @@ exports.adminFinalizeDeposit = (0, https_1.onCall)(callableRuntimeOpts, async (r
     }
     await audit(actorUid, 'adminFinalizeDeposit', { depositId, decision, creditedAmount });
     return { ok: true, credited: creditedAmount };
+});
+const WALLET_SHADOW_KEYS = ['deposit', 'activation', 'cash'];
+/**
+ * Old `set(..., { merge: true })` with dotted keys like `wallets.deposit` created stray top-level fields
+ * literally named `wallets.deposit` while the nested map `wallets.deposit` stayed at 0 — the app reads
+ * nested `wallets.*` only, so balances appeared empty. This merges each shadow into nested `wallets.*`
+ * and deletes the shadow segment. Idempotent for already-clean docs.
+ */
+exports.adminRepairWalletShadowFields = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
+    if (!request.auth?.uid)
+        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
+    const actorUid = request.auth.uid;
+    await assertFirestoreAdmin(actorUid);
+    const userId = String(request.data?.userId ?? '').trim();
+    if (!userId)
+        throw new https_1.HttpsError('invalid-argument', 'userId is required');
+    const ref = db.collection(COL_USERS).doc(userId);
+    const merged = [];
+    await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists)
+            throw new https_1.HttpsError('not-found', 'User not found');
+        const pairs = [];
+        for (const w of WALLET_SHADOW_KEYS) {
+            const ghost = snap.get(new firestore_1.FieldPath(`wallets.${w}`));
+            if (typeof ghost !== 'number' || !Number.isFinite(ghost) || ghost === 0)
+                continue;
+            const nested = snap.get(new firestore_1.FieldPath('wallets', w));
+            const n = typeof nested === 'number' && Number.isFinite(nested) ? nested : Number(nested ?? 0) || 0;
+            pairs.push([new firestore_1.FieldPath('wallets', w), n + ghost]);
+            pairs.push([new firestore_1.FieldPath(`wallets.${w}`), firestore_1.FieldValue.delete()]);
+            merged.push(w);
+        }
+        if (pairs.length === 0)
+            return;
+        pairs.push(['updatedAt', Date.now()]);
+        const flat = pairs.flat();
+        tx.update(ref, ...flat);
+    });
+    await audit(actorUid, 'adminRepairWalletShadowFields', { userId, mergedLeaves: merged });
+    return { ok: true, repaired: merged.length > 0, mergedLeaves: merged };
 });
 /** Push the same notification document to every user (batched). */
 exports.adminBroadcastNotification = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
@@ -1742,15 +1783,12 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
         if (compound)
             patch.compoundingBalance = bal + daily;
         await docSnap.ref.update(patch);
-        await db
-            .collection(COL_USERS)
-            .doc(userId)
-            .set({
+        await db.collection(COL_USERS).doc(userId).update({
             'wallets.cash': firestore_1.FieldValue.increment(daily),
             dailyProfitsTotal: firestore_1.FieldValue.increment(daily),
             nonWorkingIncomeBalance: firestore_1.FieldValue.increment(daily),
             updatedAt: Date.now(),
-        }, { merge: true });
+        });
         await db.collection(COL_DAILY).add({
             userId,
             amount: daily,

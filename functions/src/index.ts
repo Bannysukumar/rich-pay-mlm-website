@@ -274,7 +274,7 @@ async function payWorkingIncomeForActivation(
     }
     if (kind === 'sponsor') payload.sponsorBonusTotal = FieldValue.increment(payAmt)
     else payload.teamLevelCommissionTotal = FieldValue.increment(payAmt)
-    await db.collection(COL_USERS).doc(uid).set(payload, { merge: true })
+    await db.collection(COL_USERS).doc(uid).update(payload)
     await db.collection(bonusColl).add({
       ...bonusDoc,
       amount: payAmt,
@@ -526,17 +526,14 @@ async function processRankRewardForUser(uid: string, dayKey: string) {
       createdAt: FieldValue.serverTimestamp(),
     })
 
-    await ref.set(
-      {
-        'wallets.cash': FieldValue.increment(daily),
-        rankCommissionTotal: FieldValue.increment(daily),
-        workingIncomeBalance: FieldValue.increment(daily),
-        rankRewardDaysPaid: nextDay,
-        rankRewardLastPaidDayKey: dayKey,
-        updatedAt: Date.now(),
-      },
-      { merge: true },
-    )
+    await ref.update({
+      'wallets.cash': FieldValue.increment(daily),
+      rankCommissionTotal: FieldValue.increment(daily),
+      workingIncomeBalance: FieldValue.increment(daily),
+      rankRewardDaysPaid: nextDay,
+      rankRewardLastPaidDayKey: dayKey,
+      updatedAt: Date.now(),
+    })
 
     if (nextDay >= totalDays) {
       await finalizeRankSchedule(uid, rankId)
@@ -1695,14 +1692,10 @@ export const adminFinalizeDeposit = onCall(callableRuntimeOpts, async (request) 
     }
 
     if (!alreadyCredited) {
-      tx.set(
-        userRef,
-        {
-          'wallets.deposit': FieldValue.increment(amount),
-          updatedAt: Date.now(),
-        },
-        { merge: true },
-      )
+      tx.update(userRef, {
+        'wallets.deposit': FieldValue.increment(amount),
+        updatedAt: Date.now(),
+      })
     }
 
     if (cur === 'pending') {
@@ -1743,6 +1736,53 @@ export const adminFinalizeDeposit = onCall(callableRuntimeOpts, async (request) 
 
   await audit(actorUid, 'adminFinalizeDeposit', { depositId, decision, creditedAmount })
   return { ok: true, credited: creditedAmount }
+})
+
+const WALLET_SHADOW_KEYS = ['deposit', 'activation', 'cash'] as const
+
+/**
+ * Old `set(..., { merge: true })` with dotted keys like `wallets.deposit` created stray top-level fields
+ * literally named `wallets.deposit` while the nested map `wallets.deposit` stayed at 0 — the app reads
+ * nested `wallets.*` only, so balances appeared empty. This merges each shadow into nested `wallets.*`
+ * and deletes the shadow segment. Idempotent for already-clean docs.
+ */
+export const adminRepairWalletShadowFields = onCall(callableRuntimeOpts, async (request) => {
+  if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')
+  const actorUid = request.auth.uid
+  await assertFirestoreAdmin(actorUid)
+
+  const userId = String((request.data as { userId?: string })?.userId ?? '').trim()
+  if (!userId) throw new HttpsError('invalid-argument', 'userId is required')
+
+  const ref = db.collection(COL_USERS).doc(userId)
+  type Up = [string | FieldPath, unknown]
+  const merged: string[] = []
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists) throw new HttpsError('not-found', 'User not found')
+
+    const pairs: Up[] = []
+    for (const w of WALLET_SHADOW_KEYS) {
+      const ghost = snap.get(new FieldPath(`wallets.${w}`))
+      if (typeof ghost !== 'number' || !Number.isFinite(ghost) || ghost === 0) continue
+      const nested = snap.get(new FieldPath('wallets', w))
+      const n =
+        typeof nested === 'number' && Number.isFinite(nested) ? nested : Number(nested ?? 0) || 0
+      pairs.push([new FieldPath('wallets', w), n + ghost])
+      pairs.push([new FieldPath(`wallets.${w}`), FieldValue.delete()])
+      merged.push(w)
+    }
+
+    if (pairs.length === 0) return
+
+    pairs.push(['updatedAt', Date.now()])
+    const flat = pairs.flat() as [string | FieldPath, unknown, ...unknown[]]
+    ;(tx.update as (r: typeof ref, ...args: unknown[]) => void)(ref, ...flat)
+  })
+
+  await audit(actorUid, 'adminRepairWalletShadowFields', { userId, mergedLeaves: merged })
+  return { ok: true, repaired: merged.length > 0, mergedLeaves: merged }
 })
 
 /** Push the same notification document to every user (batched). */
@@ -1983,18 +2023,12 @@ export const processDailyRoi = onSchedule(
     const patch: Record<string, unknown> = { nonWorkingPaid: newPaid }
     if (compound) patch.compoundingBalance = bal + daily
     await docSnap.ref.update(patch)
-    await db
-      .collection(COL_USERS)
-      .doc(userId)
-      .set(
-        {
-          'wallets.cash': FieldValue.increment(daily),
-          dailyProfitsTotal: FieldValue.increment(daily),
-          nonWorkingIncomeBalance: FieldValue.increment(daily),
-          updatedAt: Date.now(),
-        },
-        { merge: true },
-      )
+    await db.collection(COL_USERS).doc(userId).update({
+      'wallets.cash': FieldValue.increment(daily),
+      dailyProfitsTotal: FieldValue.increment(daily),
+      nonWorkingIncomeBalance: FieldValue.increment(daily),
+      updatedAt: Date.now(),
+    })
 
     await db.collection(COL_DAILY).add({
       userId,
