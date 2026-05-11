@@ -37,7 +37,7 @@ const schema = z.object({
       (v) => /^\d{4,12}$/.test(v.trim()) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
       'Enter your UserID or a valid email',
     ),
-  password: z.string().min(6, 'Minimum 6 characters'),
+  password: z.string().min(1, 'Password is required'),
 })
 
 type Form = z.infer<typeof schema>
@@ -46,6 +46,18 @@ function resolveLoginEmail(input: string): string {
   const v = input.trim()
   if (/^\d{4,12}$/.test(v)) return `${v}@${LOGIN_USERID_EMAIL_DOMAIN}`
   return v
+}
+
+/**
+ * Imported users whose original password (from `Wallet Balance (Cash Wallet).xlsx`
+ * / `Wallet Balance (Activation Wallet).xlsx`) was shorter than Firebase Auth's
+ * 6-character minimum had their stored password right-padded with `0`s at import
+ * time (see `scripts/import-excel-users.mjs`). Apply the same padding here so
+ * they can type their original short password and still sign in transparently.
+ * Passwords with 6+ characters are returned unchanged.
+ */
+function normalizeLoginPassword(raw: string): string {
+  return raw.length < 6 ? raw.padEnd(6, '0') : raw
 }
 
 export function LoginPage() {
@@ -86,7 +98,11 @@ export function LoginPage() {
     try {
       // IndexedDB survives browser quit; session storage is cleared when the session ends.
       await setPersistence(auth, staySignedIn ? indexedDBLocalPersistence : browserSessionPersistence)
-      await signInWithEmailAndPassword(auth, resolveLoginEmail(data.userid), data.password)
+      await signInWithEmailAndPassword(
+        auth,
+        resolveLoginEmail(data.userid),
+        normalizeLoginPassword(data.password),
+      )
       toast.success('Welcome back')
       navigate('/dashboard', { replace: true })
     } catch {
