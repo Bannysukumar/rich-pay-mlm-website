@@ -22,12 +22,31 @@ function safeReturnPath(from: unknown): string {
   return from
 }
 
+/**
+ * Accept either a numeric USERID (e.g. 6618595) — which we expand to the
+ * deterministic auth email <USERID>@richpay.local used at import time — or
+ * a plain email address.
+ */
+const LOGIN_USERID_EMAIL_DOMAIN = 'richpay.local'
+
 const schema = z.object({
-  userid: z.string().min(1, 'UserID is required').email('Enter a valid email'),
+  userid: z
+    .string()
+    .min(1, 'UserID or email is required')
+    .refine(
+      (v) => /^\d{4,12}$/.test(v.trim()) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
+      'Enter your UserID or a valid email',
+    ),
   password: z.string().min(6, 'Minimum 6 characters'),
 })
 
 type Form = z.infer<typeof schema>
+
+function resolveLoginEmail(input: string): string {
+  const v = input.trim()
+  if (/^\d{4,12}$/.test(v)) return `${v}@${LOGIN_USERID_EMAIL_DOMAIN}`
+  return v
+}
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -67,7 +86,7 @@ export function LoginPage() {
     try {
       // IndexedDB survives browser quit; session storage is cleared when the session ends.
       await setPersistence(auth, staySignedIn ? indexedDBLocalPersistence : browserSessionPersistence)
-      await signInWithEmailAndPassword(auth, data.userid.trim(), data.password)
+      await signInWithEmailAndPassword(auth, resolveLoginEmail(data.userid), data.password)
       toast.success('Welcome back')
       navigate('/dashboard', { replace: true })
     } catch {
@@ -114,12 +133,12 @@ export function LoginPage() {
 
           <form id="loginForm" className="auth-form" onSubmit={handleSubmit(onSubmit)} noValidate>
             <div className="form-group">
-              <label htmlFor="login-userid">UserID</label>
+              <label htmlFor="login-userid">UserID or Email</label>
               <input
                 id="login-userid"
                 type="text"
                 className="form-control"
-                placeholder="UserID"
+                placeholder="UserID or email"
                 autoComplete="username"
                 {...register('userid')}
               />
