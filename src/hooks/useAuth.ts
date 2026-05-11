@@ -52,6 +52,12 @@ function mapUserDoc(uid: string, data: Record<string, unknown>): UserProfile {
     restTeamBusiness: Number(data.restTeamBusiness ?? 0),
     nonWorkingIncomeBalance: Number(data.nonWorkingIncomeBalance ?? 0),
     workingIncomeBalance: Number(data.workingIncomeBalance ?? 0),
+    totalWorkingIncome:
+      data.userTotals != null && typeof data.userTotals === 'object'
+        ? Number((data.userTotals as Record<string, unknown>).totalWorkingIncome ?? 0)
+        : Number(data.sponsorBonusTotal ?? 0) +
+          Number(data.teamLevelCommissionTotal ?? 0) +
+          Number(data.rankCommissionTotal ?? 0),
     sponsorBonusTotal: Number(data.sponsorBonusTotal ?? 0),
     dailyProfitsTotal: Number(data.dailyProfitsTotal ?? 0),
     teamLevelCommissionTotal: Number(data.teamLevelCommissionTotal ?? 0),

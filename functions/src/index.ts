@@ -134,6 +134,9 @@ async function hasAtLeastOneActivePackage(uid: string): Promise<boolean> {
 
 function workingIncomeCreditedTotal(ud: Record<string, unknown> | undefined): number {
   if (!ud) return 0
+  const totals = ud.userTotals as Record<string, unknown> | undefined
+  const explicit = Number(totals?.totalWorkingIncome ?? NaN)
+  if (Number.isFinite(explicit) && explicit >= 0) return explicit
   return (
     Number(ud.sponsorBonusTotal ?? 0) +
     Number(ud.teamLevelCommissionTotal ?? 0) +
@@ -344,6 +347,7 @@ async function paySponsorBonusForActivation(
       'wallets.cash': FieldValue.increment(payAmt),
       workingIncomeBalance: FieldValue.increment(payAmt),
       sponsorBonusTotal: FieldValue.increment(payAmt),
+      'userTotals.totalWorkingIncome': FieldValue.increment(payAmt),
       updatedAt: Date.now(),
     })
     await db.collection('sponsorBonuses').add({
@@ -359,7 +363,15 @@ async function paySponsorBonusForActivation(
   await db
     .collection(COL_ACTIVE)
     .doc(activePackageId)
-    .set({ workingPaid: sponsorPaid, sponsorPaidAtActivation: sponsorPaid, updatedAt: Date.now() }, { merge: true })
+    .set(
+      {
+        workingPaid: sponsorPaid,
+        workingIncomeEarned: sponsorPaid,
+        sponsorPaidAtActivation: sponsorPaid,
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    )
 }
 
 /** Split of downline daily ROI to uplines — % × credited ROI; each pay min(gross, sponsor’s working room left). */
@@ -404,8 +416,20 @@ async function distributeTeamLevelIncomeFromDailyRoi(
               'wallets.cash': FieldValue.increment(payAmt),
               workingIncomeBalance: FieldValue.increment(payAmt),
               teamLevelCommissionTotal: FieldValue.increment(payAmt),
+              'userTotals.totalWorkingIncome': FieldValue.increment(payAmt),
               updatedAt: Date.now(),
             })
+            await db
+              .collection(COL_ACTIVE)
+              .doc(downlineActivePackageId)
+              .set(
+                {
+                  workingPaid: FieldValue.increment(payAmt),
+                  workingIncomeEarned: FieldValue.increment(payAmt),
+                  updatedAt: Date.now(),
+                },
+                { merge: true },
+              )
             await db.collection('teamLevelBonuses').add({
               userId: upl,
               fromUserId: downlineUid,
@@ -651,6 +675,7 @@ async function processRankRewardForUser(uid: string, dayKey: string) {
       'wallets.cash': FieldValue.increment(payAmt),
       rankCommissionTotal: FieldValue.increment(payAmt),
       workingIncomeBalance: FieldValue.increment(payAmt),
+      'userTotals.totalWorkingIncome': FieldValue.increment(payAmt),
       rankRewardDaysPaid: nextDay,
       rankRewardLastPaidDayKey: dayKey,
       updatedAt: Date.now(),
@@ -786,6 +811,7 @@ export const registerWithProfile = onCall(callableRuntimeOpts, async (request) =
     dailyProfitsTotal: 0,
     teamLevelCommissionTotal: 0,
     rankCommissionTotal: 0,
+    userTotals: { totalWorkingIncome: 0 },
     createdAt: now,
     updatedAt: now,
   }
@@ -1193,11 +1219,16 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
     packageId,
     packageName: String(pkg.name ?? ''),
     activationAmount: amount,
+    packageAmount: amount,
     roiPercent,
     durationDays,
     planType: planLabel,
+    nonWorkingMultiplier: frozenNonWorkingCapMultiplier,
     nonWorkingIncomeCapMultiplier: frozenNonWorkingCapMultiplier,
+    workingMultiplier: frozenWorkingCapMultiplier,
     workingIncomeCapMultiplier: frozenWorkingCapMultiplier,
+    nonWorkingCap: amount * Math.max(frozenNonWorkingCapMultiplier, 0),
+    workingCap: amount * Math.max(frozenWorkingCapMultiplier, 0),
     totalReturnMultiplier: frozenNonWorkingCapMultiplier,
     totalReturnPercent: frozenNonWorkingCapMultiplier * 100,
     sponsorPercent: sponsorPctFrozen,
@@ -1247,6 +1278,7 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
       endsAt: ends,
       nonWorkingPaid: 0,
       workingPaid: 0,
+      workingIncomeEarned: 0,
       status: 'active',
       planType: planLabel,
       purchasedByUid: uid,

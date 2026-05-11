@@ -44,6 +44,7 @@ export interface UserProfile {
   restTeamBusiness: number
   nonWorkingIncomeBalance: number
   workingIncomeBalance: number
+  totalWorkingIncome?: number
   sponsorBonusTotal: number
   dailyProfitsTotal: number
   teamLevelCommissionTotal: number
@@ -155,6 +156,7 @@ export interface ActivePackage {
   nonWorkingPaid: number
   /** Sponsor bonus paid at activation (counts toward upline 3× ceiling); team level is from daily ROI. */
   workingPaid: number
+  workingIncomeEarned?: number
   status: 'active' | 'completed' | 'capped'
   frozenNonWorkingCapMultiplier?: number
   frozenWorkingCapMultiplier?: number

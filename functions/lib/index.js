@@ -158,6 +158,10 @@ async function hasAtLeastOneActivePackage(uid) {
 function workingIncomeCreditedTotal(ud) {
     if (!ud)
         return 0;
+    const totals = ud.userTotals;
+    const explicit = Number(totals?.totalWorkingIncome ?? NaN);
+    if (Number.isFinite(explicit) && explicit >= 0)
+        return explicit;
     return (Number(ud.sponsorBonusTotal ?? 0) +
         Number(ud.teamLevelCommissionTotal ?? 0) +
         Number(ud.rankCommissionTotal ?? 0));
@@ -328,6 +332,7 @@ async function paySponsorBonusForActivation(activePackageId, beneficiaryUid, act
             'wallets.cash': firestore_1.FieldValue.increment(payAmt),
             workingIncomeBalance: firestore_1.FieldValue.increment(payAmt),
             sponsorBonusTotal: firestore_1.FieldValue.increment(payAmt),
+            'userTotals.totalWorkingIncome': firestore_1.FieldValue.increment(payAmt),
             updatedAt: Date.now(),
         });
         await db.collection('sponsorBonuses').add({
@@ -342,7 +347,12 @@ async function paySponsorBonusForActivation(activePackageId, beneficiaryUid, act
     await db
         .collection(COL_ACTIVE)
         .doc(activePackageId)
-        .set({ workingPaid: sponsorPaid, sponsorPaidAtActivation: sponsorPaid, updatedAt: Date.now() }, { merge: true });
+        .set({
+        workingPaid: sponsorPaid,
+        workingIncomeEarned: sponsorPaid,
+        sponsorPaidAtActivation: sponsorPaid,
+        updatedAt: Date.now(),
+    }, { merge: true });
 }
 /** Split of downline daily ROI to uplines — % × credited ROI; each pay min(gross, sponsor’s working room left). */
 async function distributeTeamLevelIncomeFromDailyRoi(downlineActivePackageId, downlineUid, dailyRoiCredited, planSnap) {
@@ -383,8 +393,17 @@ async function distributeTeamLevelIncomeFromDailyRoi(downlineActivePackageId, do
                             'wallets.cash': firestore_1.FieldValue.increment(payAmt),
                             workingIncomeBalance: firestore_1.FieldValue.increment(payAmt),
                             teamLevelCommissionTotal: firestore_1.FieldValue.increment(payAmt),
+                            'userTotals.totalWorkingIncome': firestore_1.FieldValue.increment(payAmt),
                             updatedAt: Date.now(),
                         });
+                        await db
+                            .collection(COL_ACTIVE)
+                            .doc(downlineActivePackageId)
+                            .set({
+                            workingPaid: firestore_1.FieldValue.increment(payAmt),
+                            workingIncomeEarned: firestore_1.FieldValue.increment(payAmt),
+                            updatedAt: Date.now(),
+                        }, { merge: true });
                         await db.collection('teamLevelBonuses').add({
                             userId: upl,
                             fromUserId: downlineUid,
@@ -601,6 +620,7 @@ async function processRankRewardForUser(uid, dayKey) {
             'wallets.cash': firestore_1.FieldValue.increment(payAmt),
             rankCommissionTotal: firestore_1.FieldValue.increment(payAmt),
             workingIncomeBalance: firestore_1.FieldValue.increment(payAmt),
+            'userTotals.totalWorkingIncome': firestore_1.FieldValue.increment(payAmt),
             rankRewardDaysPaid: nextDay,
             rankRewardLastPaidDayKey: dayKey,
             updatedAt: Date.now(),
@@ -716,6 +736,7 @@ exports.registerWithProfile = (0, https_1.onCall)(callableRuntimeOpts, async (re
         dailyProfitsTotal: 0,
         teamLevelCommissionTotal: 0,
         rankCommissionTotal: 0,
+        userTotals: { totalWorkingIncome: 0 },
         createdAt: now,
         updatedAt: now,
     };
@@ -1056,11 +1077,16 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
         packageId,
         packageName: String(pkg.name ?? ''),
         activationAmount: amount,
+        packageAmount: amount,
         roiPercent,
         durationDays,
         planType: planLabel,
+        nonWorkingMultiplier: frozenNonWorkingCapMultiplier,
         nonWorkingIncomeCapMultiplier: frozenNonWorkingCapMultiplier,
+        workingMultiplier: frozenWorkingCapMultiplier,
         workingIncomeCapMultiplier: frozenWorkingCapMultiplier,
+        nonWorkingCap: amount * Math.max(frozenNonWorkingCapMultiplier, 0),
+        workingCap: amount * Math.max(frozenWorkingCapMultiplier, 0),
         totalReturnMultiplier: frozenNonWorkingCapMultiplier,
         totalReturnPercent: frozenNonWorkingCapMultiplier * 100,
         sponsorPercent: sponsorPctFrozen,
@@ -1107,6 +1133,7 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
             endsAt: ends,
             nonWorkingPaid: 0,
             workingPaid: 0,
+            workingIncomeEarned: 0,
             status: 'active',
             planType: planLabel,
             purchasedByUid: uid,

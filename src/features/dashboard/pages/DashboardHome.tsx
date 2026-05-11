@@ -216,6 +216,15 @@ export function DashboardHome() {
 
   const feePct = Number(withdrawalPolicyMerged.withdrawFeePercent ?? settings.withdrawFeePercent)
   const minWd = Number(withdrawalPolicyMerged.minWithdrawal ?? settings.minWithdrawal)
+  const workingMult = Number(settings.workingIncomeCapMultiplier ?? 3)
+  const nonWorkingMult = Number(settings.nonWorkingIncomeCapMultiplier ?? 2)
+  const principalSum = Number(activePackageTotal ?? 0)
+  const workingCap = principalSum * Math.max(0, workingMult)
+  const nonWorkingCap = principalSum * Math.max(0, nonWorkingMult)
+  const workingEarned = Number(profile.totalWorkingIncome ?? profile.workingIncomeBalance ?? 0)
+  const nonWorkingEarned = Number(profile.dailyProfitsTotal ?? profile.nonWorkingIncomeBalance ?? 0)
+  const workingRemaining = Math.max(0, workingCap - workingEarned)
+  const nonWorkingRemaining = Math.max(0, nonWorkingCap - nonWorkingEarned)
   const capLine =
     !Number.isFinite(maxWithdrawThisCycle)
       ? 'No per-request cap (policy)'
@@ -249,13 +258,13 @@ export function DashboardHome() {
 
   const row3: Stat[] = [
     {
-      label: 'Non Working Income Balance (2x)',
-      value: `$ ${fmt(profile.nonWorkingIncomeBalance)}`,
+      label: 'Non Working (2x) — earned / remaining',
+      value: `$ ${fmt(nonWorkingEarned)} / $ ${fmt(nonWorkingRemaining)}`,
       tone: 'primary',
     },
     {
-      label: 'Working Income Balance (3x)',
-      value: `$ ${fmt(profile.workingIncomeBalance)}`,
+      label: 'Working (3x) — earned / remaining',
+      value: `$ ${fmt(workingEarned)} / $ ${fmt(workingRemaining)}`,
       tone: 'danger',
     },
   ]
