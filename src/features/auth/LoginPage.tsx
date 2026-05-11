@@ -13,8 +13,9 @@ import toast from 'react-hot-toast'
 import { z } from 'zod'
 import { PublicNavbar } from '@/features/landing/PublicNavbar'
 import '@/features/landing/landing.css'
+import { doc, getDoc } from 'firebase/firestore'
 import { useAuthState } from '@/hooks/useAuth'
-import { auth } from '@/lib/firebase'
+import { auth, db } from '@/lib/firebase'
 
 function safeReturnPath(from: unknown): string {
   if (typeof from !== 'string' || !from.startsWith('/') || from.startsWith('//')) return '/dashboard'
@@ -23,11 +24,13 @@ function safeReturnPath(from: unknown): string {
 }
 
 /**
- * Accept either a numeric USERID (e.g. 6618595) — which we expand to the
- * deterministic auth email <USERID>@richpay.local used at import time — or
- * a plain email address.
+ * Accept either a numeric USERID or a plain email.
+ * Imported members use `<USERID>@richpay.local` in Firebase Auth.
+ * Members registered with a real email store `authEmail` on `usersByUsername/{USERID}`
+ * so the same numeric ID still signs into the correct Auth identity.
  */
 const LOGIN_USERID_EMAIL_DOMAIN = 'richpay.local'
+const COL_USERS_BY_USERNAME = 'usersByUsername'
 
 const schema = z.object({
   userid: z
@@ -42,10 +45,25 @@ const schema = z.object({
 
 type Form = z.infer<typeof schema>
 
-function resolveLoginEmail(input: string): string {
+function isValidEmail(v: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
+}
+
+/** Resolve the Firebase Auth email for the login field (async for numeric USERID lookup). */
+async function resolveSignInEmail(input: string): Promise<string> {
   const v = input.trim()
-  if (/^\d{4,12}$/.test(v)) return `${v}@${LOGIN_USERID_EMAIL_DOMAIN}`
-  return v
+  if (!/^\d{4,12}$/.test(v)) return v.trim().toLowerCase()
+  try {
+    const snap = await getDoc(doc(db, COL_USERS_BY_USERNAME, v))
+    const alt = snap.exists() ? snap.data()?.authEmail : undefined
+    if (typeof alt === 'string') {
+      const e = alt.trim().toLowerCase()
+      if (isValidEmail(e)) return e
+    }
+  } catch {
+    // Offline or transient read errors — fall back to synthetic email.
+  }
+  return `${v}@${LOGIN_USERID_EMAIL_DOMAIN}`
 }
 
 /**
@@ -98,11 +116,8 @@ export function LoginPage() {
     try {
       // IndexedDB survives browser quit; session storage is cleared when the session ends.
       await setPersistence(auth, staySignedIn ? indexedDBLocalPersistence : browserSessionPersistence)
-      await signInWithEmailAndPassword(
-        auth,
-        resolveLoginEmail(data.userid),
-        normalizeLoginPassword(data.password),
-      )
+      const signInEmail = await resolveSignInEmail(data.userid)
+      await signInWithEmailAndPassword(auth, signInEmail, normalizeLoginPassword(data.password))
       toast.success('Welcome back')
       navigate('/dashboard', { replace: true })
     } catch {

@@ -742,7 +742,7 @@ exports.registerWithProfile = (0, https_1.onCall)(callableRuntimeOpts, async (re
     };
     const batch = db.batch();
     batch.set(db.collection(COL_USERS).doc(userRecord.uid), userDoc);
-    batch.set(db.collection(COL_USERS_BY_UN).doc(username), { uid: userRecord.uid });
+    batch.set(db.collection(COL_USERS_BY_UN).doc(username), { uid: userRecord.uid, authEmail: email });
     batch.set(phoneRef, { uid: userRecord.uid });
     await batch.commit();
     /** `activeDirects` is maintained when a direct activates their first package / loses last active package. */
