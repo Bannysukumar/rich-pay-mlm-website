@@ -15,6 +15,8 @@ export function DashboardLayout() {
   const [darkMode, setDarkMode] = useState(true)
   const [goTop, setGoTop] = useState(false)
   const mainRef = useRef<HTMLDivElement>(null)
+  /** Keep mobile menu in this subtree so `#ki-dashboard-root …` CSS applies (default portal is `body`). */
+  const dashboardRootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const el = mainRef.current
@@ -28,6 +30,7 @@ export function DashboardLayout() {
   return (
     <div
       id="ki-dashboard-root"
+      ref={dashboardRootRef}
       className={`ltr ${darkMode ? 'dark' : ''}`}
       data-bs-theme={darkMode ? 'dark' : 'light'}
     >
@@ -42,6 +45,7 @@ export function DashboardLayout() {
           show={mobileNav}
           onHide={() => setMobileNav(false)}
           placement="start"
+          container={dashboardRootRef}
           className="p-0"
           style={{ maxWidth: 300 }}
         >
