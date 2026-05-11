@@ -153,7 +153,7 @@ export interface ActivePackage {
   startedAt: number
   endsAt: number
   nonWorkingPaid: number
-  /** Cumulative sponsor + team-level payouts applied toward the 3× working cap for this activation. */
+  /** Sponsor bonus paid at activation (counts toward upline 3× ceiling); team level is from daily ROI. */
   workingPaid: number
   status: 'active' | 'completed' | 'capped'
   frozenNonWorkingCapMultiplier?: number
@@ -186,6 +186,11 @@ export interface SiteSettings {
   nonWorkingIncomeCapMultiplier?: number
   /** Working (sponsor + team) payout cap as multiple of activation amount (default 3). */
   workingIncomeCapMultiplier?: number
+  /**
+   * When true, once cumulative working income (sponsor+team+rank) reaches the user's 3× ceiling,
+   * the ROI scheduler skips that member's ROI and rank drip stops paying (new activations still snapshot flag).
+   */
+  stopAllIncomeWhenWorkingCapReached?: boolean
   /** Gate member withdrawal requests (`createWithdrawal`). */
   withdrawalsEnabled?: boolean
   withdrawNetworkLabel?: string

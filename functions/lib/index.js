@@ -147,6 +147,62 @@ async function maxActivePrincipalForUser(uid) {
     }
     return mx;
 }
+/** Sponsor / team / rank drip pay only when the earner has ≥1 active stake (any plan type). */
+async function hasAtLeastOneActivePackage(uid) {
+    const u = String(uid ?? '').trim();
+    if (!u)
+        return false;
+    const snap = await db.collection(COL_ACTIVE).where('userId', '==', u).where('status', '==', 'active').limit(1).get();
+    return !snap.empty;
+}
+function workingIncomeCreditedTotal(ud) {
+    if (!ud)
+        return 0;
+    return (Number(ud.sponsorBonusTotal ?? 0) +
+        Number(ud.teamLevelCommissionTotal ?? 0) +
+        Number(ud.rankCommissionTotal ?? 0));
+}
+/** Σ (principal × frozen working mult) across this member’s active packages. */
+async function computeUserWorkingIncomeCeiling(uid) {
+    const snap = await db.collection(COL_ACTIVE).where('userId', '==', uid).where('status', '==', 'active').get();
+    let sum = 0;
+    for (const d of snap.docs) {
+        const x = d.data();
+        const amt = Number(x.amount ?? 0);
+        const ps = x.planSnapshot;
+        const mult = Number(x.frozenWorkingCapMultiplier ??
+            (ps != null && ps.workingIncomeCapMultiplier != null ? Number(ps.workingIncomeCapMultiplier) : undefined) ??
+            3);
+        sum += amt * Math.max(0, mult);
+    }
+    return sum;
+}
+async function userWorkingIncomeRemaining(uid) {
+    const us = await db.collection(COL_USERS).doc(uid).get();
+    const ceiling = await computeUserWorkingIncomeCeiling(uid);
+    const credited = workingIncomeCreditedTotal(us.data());
+    return Math.max(0, ceiling - credited);
+}
+/** Skip ROI for this package when snapshot says stop-all and user has no working-income room left. */
+async function shouldSkipRoiForPackageOwner(userId, planSnap) {
+    if (!planSnap || planSnap.stopAllIncomeWhenWorkingCapReached !== true)
+        return false;
+    const rem = await userWorkingIncomeRemaining(userId);
+    return rem <= 1e-9;
+}
+/** Block rank drip when user exhausted working cap and at least one active package has stop-all snapshot. */
+async function shouldBlockRankPayoutForWorkingCap(uid) {
+    const rem = await userWorkingIncomeRemaining(uid);
+    if (rem > 1e-9)
+        return false;
+    const snap = await db.collection(COL_ACTIVE).where('userId', '==', uid).where('status', '==', 'active').get();
+    for (const d of snap.docs) {
+        const ps = d.data()?.planSnapshot;
+        if (ps && ps.stopAllIncomeWhenWorkingCapReached === true)
+            return true;
+    }
+    return false;
+}
 function computeMaxWithdrawalForPrincipal(principal, policy) {
     if (principal <= 0)
         return 0;
@@ -238,48 +294,73 @@ async function propagateTeamBusinessVolume(beneficiaryUid, amount, powerPct, res
         cur = sponsor;
     }
 }
-/** Sponsor + team-level payouts share one cap: activation × workingIncomeCapMultiplier (default 3). */
-async function payWorkingIncomeForActivation(activePackageId, beneficiaryUid, amount, planSnap) {
-    const wMult = Number(planSnap.workingIncomeCapMultiplier ?? 3);
-    const capTotal = amount * Math.max(wMult, 0);
-    let used = 0;
+/**
+ * One-time direct sponsor bonus when a referred user activates.
+ * Credited against the sponsor’s global working-income ceiling (Σ stake × 3).
+ * Team level income is paid daily from downline ROI — see `distributeTeamLevelIncomeFromDailyRoi`.
+ */
+async function paySponsorBonusForActivation(activePackageId, beneficiaryUid, activationAmount, planSnap) {
     const sponsorPct = Number(planSnap.sponsorPercent ?? 5);
     const bene = await db.collection(COL_USERS).doc(beneficiaryUid).get();
     const sponsorUid = bene.exists ? bene.data()?.sponsorUid : undefined;
-    const payIncome = async (uid, gross, kind, bonusColl, bonusDoc) => {
-        if (gross <= 0)
-            return;
-        const room = capTotal - used;
-        const payAmt = Math.min(gross, Math.max(0, room));
-        if (payAmt <= 0)
-            return;
-        const payload = {
+    let sponsorPaid = 0;
+    if (!sponsorUid || !(await hasAtLeastOneActivePackage(sponsorUid))) {
+        await db
+            .collection(COL_ACTIVE)
+            .doc(activePackageId)
+            .set({ workingPaid: 0, sponsorPaidAtActivation: 0, updatedAt: Date.now() }, { merge: true });
+        return;
+    }
+    const sRef = db.collection(COL_USERS).doc(sponsorUid);
+    const sSnap = await sRef.get();
+    if (!sSnap.exists || Boolean(sSnap.data()?.blocked)) {
+        await db
+            .collection(COL_ACTIVE)
+            .doc(activePackageId)
+            .set({ workingPaid: 0, sponsorPaidAtActivation: 0, updatedAt: Date.now() }, { merge: true });
+        return;
+    }
+    const gross = (activationAmount * sponsorPct) / 100;
+    const remaining = await userWorkingIncomeRemaining(sponsorUid);
+    const payAmt = Math.min(gross, Math.max(0, remaining));
+    if (payAmt > 1e-12) {
+        await sRef.update({
             'wallets.cash': firestore_1.FieldValue.increment(payAmt),
             workingIncomeBalance: firestore_1.FieldValue.increment(payAmt),
+            sponsorBonusTotal: firestore_1.FieldValue.increment(payAmt),
             updatedAt: Date.now(),
-        };
-        if (kind === 'sponsor')
-            payload.sponsorBonusTotal = firestore_1.FieldValue.increment(payAmt);
-        else
-            payload.teamLevelCommissionTotal = firestore_1.FieldValue.increment(payAmt);
-        await db.collection(COL_USERS).doc(uid).update(payload);
-        await db.collection(bonusColl).add({
-            ...bonusDoc,
+        });
+        await db.collection('sponsorBonuses').add({
+            userId: sponsorUid,
+            fromUserId: beneficiaryUid,
             amount: payAmt,
             activePackageId,
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
-        used += payAmt;
-    };
-    if (sponsorUid) {
-        const gross = (amount * sponsorPct) / 100;
-        await payIncome(sponsorUid, gross, 'sponsor', 'sponsorBonuses', {
-            userId: sponsorUid,
-            fromUserId: beneficiaryUid,
-        });
+        sponsorPaid = payAmt;
     }
+    await db
+        .collection(COL_ACTIVE)
+        .doc(activePackageId)
+        .set({ workingPaid: sponsorPaid, sponsorPaidAtActivation: sponsorPaid, updatedAt: Date.now() }, { merge: true });
+}
+/** Split of downline daily ROI to uplines — % × credited ROI; each pay min(gross, sponsor’s working room left). */
+async function distributeTeamLevelIncomeFromDailyRoi(downlineActivePackageId, downlineUid, dailyRoiCredited, planSnap) {
+    if (dailyRoiCredited <= 1e-12 || !planSnap)
+        return;
     const teamFrozen = Array.isArray(planSnap.teamLevels) ? planSnap.teamLevels : [];
-    let child = beneficiaryUid;
+    const activeCache = new Map();
+    const uplHasActive = async (uid) => {
+        const k = String(uid ?? '').trim();
+        if (!k)
+            return false;
+        if (activeCache.has(k))
+            return activeCache.get(k);
+        const ok = await hasAtLeastOneActivePackage(k);
+        activeCache.set(k, ok);
+        return ok;
+    };
+    let child = downlineUid;
     for (let depth = 0; depth < teamFrozen.length; depth++) {
         const row = teamFrozen[depth];
         const childSnap = await db.collection(COL_USERS).doc(child).get();
@@ -289,24 +370,38 @@ async function payWorkingIncomeForActivation(activePackageId, beneficiaryUid, am
         if (!upl)
             break;
         if (row && row.percent > 0) {
-            const uplSnap = await db.collection(COL_USERS).doc(upl).get();
-            const directs = Number(uplSnap.data()?.activeDirects ?? 0);
-            if (directs >= row.requiredDirects) {
-                const gross = (amount * row.percent) / 100;
-                await payIncome(upl, gross, 'team', 'teamLevelBonuses', {
-                    userId: upl,
-                    fromUserId: beneficiaryUid,
-                    level: row.level,
-                    ...(row.conditionDescription ? { conditionDescription: row.conditionDescription } : {}),
-                });
+            const uplRef = db.collection(COL_USERS).doc(upl);
+            const uplSnap = await uplRef.get();
+            if (uplSnap.exists && !Boolean(uplSnap.data()?.blocked) && (await uplHasActive(upl))) {
+                const directs = Number(uplSnap.data()?.activeDirects ?? 0);
+                if (directs >= row.requiredDirects) {
+                    const gross = (dailyRoiCredited * row.percent) / 100;
+                    const remaining = await userWorkingIncomeRemaining(upl);
+                    const payAmt = Math.min(gross, Math.max(0, remaining));
+                    if (payAmt > 1e-12) {
+                        await uplRef.update({
+                            'wallets.cash': firestore_1.FieldValue.increment(payAmt),
+                            workingIncomeBalance: firestore_1.FieldValue.increment(payAmt),
+                            teamLevelCommissionTotal: firestore_1.FieldValue.increment(payAmt),
+                            updatedAt: Date.now(),
+                        });
+                        await db.collection('teamLevelBonuses').add({
+                            userId: upl,
+                            fromUserId: downlineUid,
+                            level: row.level,
+                            amount: payAmt,
+                            activePackageId: downlineActivePackageId,
+                            sourceDailyRoi: dailyRoiCredited,
+                            distribution: 'daily_roi_share',
+                            ...(row.conditionDescription ? { conditionDescription: row.conditionDescription } : {}),
+                            createdAt: firestore_1.FieldValue.serverTimestamp(),
+                        });
+                    }
+                }
             }
         }
         child = upl;
     }
-    await db
-        .collection(COL_ACTIVE)
-        .doc(activePackageId)
-        .set({ workingPaid: used, updatedAt: Date.now() }, { merge: true });
 }
 function rankMilestoneQualifies(u, rank, powerPct, restPct) {
     const req = rank.requiredTeamBusiness;
@@ -456,6 +551,15 @@ async function processRankRewardForUser(uid, dayKey) {
         const lastKey = String(u.rankRewardLastPaidDayKey ?? '');
         if (lastKey === dayKey)
             return;
+        if (!(await hasAtLeastOneActivePackage(uid))) {
+            return;
+        }
+        if (Boolean(u.blocked)) {
+            return;
+        }
+        if (await shouldBlockRankPayoutForWorkingCap(uid)) {
+            return;
+        }
         const daysPaid = Number(u.rankRewardDaysPaid ?? 0);
         const totalDays = Number(u.rankRewardTotalDays ?? 0);
         const rankId = String(u.rankRewardRankId ?? '');
@@ -471,6 +575,11 @@ async function processRankRewardForUser(uid, dayKey) {
             await tryStartNextRankSchedule(uid);
             return;
         }
+        const workingRem = await userWorkingIncomeRemaining(uid);
+        const payAmt = Math.min(daily, Math.max(0, workingRem));
+        if (payAmt <= 1e-12) {
+            return;
+        }
         const nextDay = daysPaid + 1;
         const bonusId = `${uid}_${dayKey}_${rankId}_d${nextDay}`;
         const existed = await db.collection('rankBonuses').doc(bonusId).get();
@@ -480,7 +589,7 @@ async function processRankRewardForUser(uid, dayKey) {
             userId: uid,
             rankId,
             rankName,
-            amount: daily,
+            amount: payAmt,
             dayKey,
             payoutSequenceDay: nextDay,
             payoutDaysTotal: totalDays,
@@ -489,9 +598,9 @@ async function processRankRewardForUser(uid, dayKey) {
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
         await ref.update({
-            'wallets.cash': firestore_1.FieldValue.increment(daily),
-            rankCommissionTotal: firestore_1.FieldValue.increment(daily),
-            workingIncomeBalance: firestore_1.FieldValue.increment(daily),
+            'wallets.cash': firestore_1.FieldValue.increment(payAmt),
+            rankCommissionTotal: firestore_1.FieldValue.increment(payAmt),
+            workingIncomeBalance: firestore_1.FieldValue.increment(payAmt),
             rankRewardDaysPaid: nextDay,
             rankRewardLastPaidDayKey: dayKey,
             updatedAt: Date.now(),
@@ -917,6 +1026,7 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
     const siteNwMult = Number(settings.nonWorkingIncomeCapMultiplier ?? 2);
     const frozenNonWorkingCapMultiplier = pkgNwMult > 0 ? pkgNwMult : siteNwMult;
     const frozenWorkingCapMultiplier = Number(settings.workingIncomeCapMultiplier ?? 3);
+    const stopAllIncomeFrozen = settings.stopAllIncomeWhenWorkingCapReached === true;
     const minWithdrawFrozen = Number(settings.minWithdrawal ?? 10);
     const withdrawFeeFrozen = Number(settings.withdrawFeePercent ?? 10);
     const planSettingsVersion = Number(settings.planSettingsVersion ?? 0);
@@ -962,6 +1072,7 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
         ranks: ranksFrozen,
         withdrawalPolicySnapshot: withdrawFrozen,
         roiAccrualMode: planLabel === 'compounding' ? 'compound_balance' : 'flat_principal',
+        stopAllIncomeWhenWorkingCapReached: stopAllIncomeFrozen,
     };
     const apRef = db.collection(COL_ACTIVE).doc();
     const preActiveForBene = await db
@@ -1005,7 +1116,7 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
             ...(planLabel === 'compounding' ? { compoundingBalance: amount } : {}),
         });
     });
-    await payWorkingIncomeForActivation(apRef.id, beneficiaryUid, amount, planSnapshot);
+    await paySponsorBonusForActivation(apRef.id, beneficiaryUid, amount, planSnapshot);
     await propagateTeamBusinessVolume(beneficiaryUid, amount, rkPowerPct, rkRestPct);
     await db
         .collection(COL_USERS)
@@ -1762,26 +1873,42 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
         }
         const amount = Number(ap.amount ?? 0);
         const planSnap = (ap.planSnapshot ?? null);
-        const roiPercent = Number((planSnap && planSnap.roiPercent != null ? planSnap.roiPercent : null) ?? ap.roiPercent ?? 0);
         const userId = userIdEarly;
+        const userRow = await db.collection(COL_USERS).doc(userId).get();
+        if (!userRow.exists || Boolean(userRow.data()?.blocked)) {
+            continue;
+        }
+        if (await shouldSkipRoiForPackageOwner(userId, planSnap)) {
+            continue;
+        }
+        const roiPercent = Number((planSnap && planSnap.roiPercent != null ? planSnap.roiPercent : null) ?? ap.roiPercent ?? 0);
         const nonWorkingPaid = Number(ap.nonWorkingPaid ?? 0);
         const nwMult = Number(ap.frozenNonWorkingCapMultiplier ??
             planSnap?.nonWorkingIncomeCapMultiplier ??
             2);
         const cap = amount * Math.max(nwMult, 0);
-        const planTypeStr = String((planSnap && planSnap.planType != null ? planSnap.planType : null) ?? ap.planType ?? 'daily').toLowerCase();
-        const compound = planTypeStr === 'compounding';
-        const bal = compound ? Number(ap.compoundingBalance ?? amount) : amount;
-        const daily = (bal * roiPercent) / 100;
-        if (nonWorkingPaid + daily > cap) {
+        const headroom = Math.max(0, cap - nonWorkingPaid);
+        if (headroom <= 1e-12) {
             await docSnap.ref.set({ status: 'capped', updatedAt: now }, { merge: true });
             await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(userId);
             continue;
         }
+        const planTypeStr = String((planSnap && planSnap.planType != null ? planSnap.planType : null) ?? ap.planType ?? 'daily').toLowerCase();
+        const compound = planTypeStr === 'compounding';
+        const bal = compound ? Number(ap.compoundingBalance ?? amount) : amount;
+        const rawDaily = (bal * roiPercent) / 100;
+        const daily = Math.min(rawDaily, headroom);
+        if (daily <= 1e-12) {
+            continue;
+        }
         const newPaid = nonWorkingPaid + daily;
-        const patch = { nonWorkingPaid: newPaid };
+        const hitCap = newPaid >= cap - 1e-9;
+        const patch = { nonWorkingPaid: newPaid, updatedAt: now };
         if (compound)
             patch.compoundingBalance = bal + daily;
+        if (hitCap) {
+            patch.status = 'capped';
+        }
         await docSnap.ref.update(patch);
         await db.collection(COL_USERS).doc(userId).update({
             'wallets.cash': firestore_1.FieldValue.increment(daily),
@@ -1795,6 +1922,10 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
             activePackageId: docSnap.id,
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
+        await distributeTeamLevelIncomeFromDailyRoi(docSnap.id, userId, daily, planSnap);
+        if (hitCap) {
+            await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(userId);
+        }
     }
 });
 /**

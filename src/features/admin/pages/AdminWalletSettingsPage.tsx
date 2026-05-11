@@ -47,6 +47,7 @@ export function AdminWalletSettingsPage() {
   const [processingMode, setProcessingMode] = useState<'manual' | 'auto'>('manual')
   const [processingHours, setProcessingHours] = useState('48')
   const [defaultPct, setDefaultPct] = useState('20')
+  const [stopAllAtWorkingCap, setStopAllAtWorkingCap] = useState(false)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -65,6 +66,7 @@ export function AdminWalletSettingsPage() {
     setProcessingMode(data.withdrawalProcessingMode === 'auto' ? 'auto' : 'manual')
     setProcessingHours(String(Number(data.withdrawalProcessingIntervalHours ?? 48)))
     setDefaultPct(String(Number(data.defaultWithdrawalPercentOfPackage ?? 20)))
+    setStopAllAtWorkingCap(Boolean(data.stopAllIncomeWhenWorkingCapReached))
   }, [data, ready])
 
   const persist = async () => {
@@ -76,6 +78,7 @@ export function AdminWalletSettingsPage() {
           withdrawFeePercent: Number(fee),
           nonWorkingIncomeCapMultiplier: Number(nwCap || 2),
           workingIncomeCapMultiplier: Number(wCap || 3),
+          stopAllIncomeWhenWorkingCapReached: stopAllAtWorkingCap,
           withdrawNetworkLabel: withdrawNetwork.trim(),
           withdrawalWindowStart: winStart.trim(),
           withdrawalWindowEnd: winEnd.trim(),
@@ -310,10 +313,25 @@ export function AdminWalletSettingsPage() {
           <p className="text-[10px] text-zinc-500">Frozen on each activation; defaults to 2 (200%).</p>
         </div>
         <div>
-          <Label>Working income cap (× activation)</Label>
+          <Label>Working income cap (× per active stake, summed)</Label>
           <Input value={wCap} onChange={(e) => setWCap(e.target.value)} />
-          <p className="text-[10px] text-zinc-500">Caps sponsor + team pool per purchase.</p>
+          <p className="text-[10px] text-zinc-500">
+            Sponsor + team (from daily ROI) + rank drip total vs Σ(principal × this mult) across active packages.
+          </p>
         </div>
+        <label className="flex items-start gap-2 text-sm text-zinc-300 md:col-span-2">
+          <input
+            type="checkbox"
+            className="mt-1 accent-red-600"
+            checked={stopAllAtWorkingCap}
+            onChange={(e) => setStopAllAtWorkingCap(e.target.checked)}
+          />
+          <span>
+            When working cap is reached: stop{' '}
+            <strong className="text-zinc-200">all income</strong> for that member (daily ROI, sponsor, team, rank)
+            if this flag is frozen on their snapshot. Off by default.
+          </span>
+        </label>
         <Button
           type="button"
           variant="danger"

@@ -29,6 +29,7 @@ const defaults: SiteSettings = {
   teamLevelsCount: 30,
   nonWorkingIncomeCapMultiplier: 2,
   workingIncomeCapMultiplier: 3,
+  stopAllIncomeWhenWorkingCapReached: false,
   rankRewardsEnabled: true,
   rankQualificationPowerPercent: 50,
   rankQualificationRestPercent: 50,
@@ -119,6 +120,10 @@ export function useSiteSettings() {
           workingIncomeCapMultiplier: Number(
             d.workingIncomeCapMultiplier ?? defaults.workingIncomeCapMultiplier ?? 3,
           ),
+          stopAllIncomeWhenWorkingCapReached:
+            d.stopAllIncomeWhenWorkingCapReached !== undefined
+              ? Boolean(d.stopAllIncomeWhenWorkingCapReached)
+              : defaults.stopAllIncomeWhenWorkingCapReached,
           rankRewardsEnabled:
             d.rankRewardsEnabled !== undefined ? Boolean(d.rankRewardsEnabled) : defaults.rankRewardsEnabled,
           rankQualificationPowerPercent: Number(
