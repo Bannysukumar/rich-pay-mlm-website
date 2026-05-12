@@ -158,6 +158,8 @@ export interface ActivePackage {
   workingPaid: number
   workingIncomeEarned?: number
   status: 'active' | 'completed' | 'capped'
+  /** When true, `processDailyRoi` skips this package (no ROI, no team-level share from its ROI). */
+  adminRoiPaused?: boolean
   frozenNonWorkingCapMultiplier?: number
   frozenWorkingCapMultiplier?: number
   planSnapshot?: PlanActivationSnapshot

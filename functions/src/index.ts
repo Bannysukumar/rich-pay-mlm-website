@@ -2278,6 +2278,11 @@ export const processDailyRoi = onSchedule(
       continue
     }
 
+    /** Admin can pause daily ROI for a specific active package (member retains other plans). */
+    if (ap.adminRoiPaused === true) {
+      continue
+    }
+
     const amount = Number(ap.amount ?? 0)
     const planSnap = (ap.planSnapshot ?? null) as Record<string, unknown> | null
     const userId = userIdEarly

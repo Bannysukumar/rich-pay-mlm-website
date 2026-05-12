@@ -2019,6 +2019,10 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
                 await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(userIdEarly);
             continue;
         }
+        /** Admin can pause daily ROI for a specific active package (member retains other plans). */
+        if (ap.adminRoiPaused === true) {
+            continue;
+        }
         const amount = Number(ap.amount ?? 0);
         const planSnap = (ap.planSnapshot ?? null);
         const userId = userIdEarly;

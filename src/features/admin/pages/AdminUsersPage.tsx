@@ -6,6 +6,7 @@ import {
   orderBy,
   query,
   updateDoc,
+  where,
 } from 'firebase/firestore'
 import type { FormEvent } from 'react'
 import { useEffect, useMemo, useState } from 'react'
@@ -41,6 +42,28 @@ type Row = {
   createdAt: number
   /** Plaintext login password — only present if historically stored on the user doc (not default). */
   storedLoginPassword: string | null
+}
+
+type MemberPackageRow = {
+  id: string
+  status: string
+  amount: number
+  planType: string
+  packageName: string
+  adminRoiPaused: boolean
+}
+
+function mapMemberPackage(docSnap: { id: string; data: () => Record<string, unknown> }): MemberPackageRow {
+  const d = docSnap.data()
+  const ps = d.planSnapshot as Record<string, unknown> | undefined
+  return {
+    id: docSnap.id,
+    status: String(d.status ?? ''),
+    amount: Number(d.amount ?? 0),
+    planType: String(d.planType ?? ps?.planType ?? '—'),
+    packageName: String(ps?.packageName ?? d.packageId ?? '—'),
+    adminRoiPaused: d.adminRoiPaused === true,
+  }
 }
 
 function readStoredPassword(d: Record<string, unknown>): string | null {
@@ -117,6 +140,7 @@ export function AdminUsersPage() {
   const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')
   const [sel, setSel] = useState<Row | null>(null)
+  const [memberPackages, setMemberPackages] = useState<MemberPackageRow[]>([])
 
   useEffect(() => {
     const r = query(collection(db, COLLECTIONS.users), orderBy('createdAt', 'desc'), limit(250))
@@ -163,6 +187,46 @@ export function AdminUsersPage() {
       },
     )
   }, [])
+
+  useEffect(() => {
+    if (!sel) {
+      setMemberPackages([])
+      return
+    }
+    const qRef = query(
+      collection(db, COLLECTIONS.activePackages),
+      where('userId', '==', sel.id),
+      orderBy('startedAt', 'desc'),
+    )
+    return onSnapshot(
+      qRef,
+      (snap) => {
+        const list: MemberPackageRow[] = []
+        snap.forEach((ds) => list.push(mapMemberPackage(ds)))
+        setMemberPackages(list)
+      },
+      () => {
+        toast.error('Could not load member packages')
+      },
+    )
+  }, [sel?.id])
+
+  const setPackageRoiPaused = async (packageId: string, paused: boolean, userId: string) => {
+    try {
+      await updateDoc(doc(db, COLLECTIONS.activePackages, packageId), {
+        adminRoiPaused: paused,
+        updatedAt: Date.now(),
+      })
+      await pushAuditLog('adminActivePackageRoiPause', {
+        activePackageId: packageId,
+        userId,
+        adminRoiPaused: paused,
+      })
+      toast.success(paused ? 'Daily ROI paused for this plan' : 'Daily ROI resumed for this plan')
+    } catch {
+      toast.error('Could not update plan — check permissions')
+    }
+  }
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase()
@@ -380,6 +444,63 @@ export function AdminUsersPage() {
                 Save profile
               </Button>
             </form>
+
+            <div className="border-t border-zinc-900 pt-4">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[#d4af37]">
+                Investment plans (ROI)
+              </p>
+              <p className="mb-3 text-[10px] leading-snug text-[#6b6b7c]">
+                For <span className="font-semibold text-[#9898a8]">active</span> plans only: pause stops daily ROI and
+                team-level share from that package until you turn it back on. Deploy latest{' '}
+                <code className="text-[#a8a8b8]">processDailyRoi</code> for production.
+              </p>
+              {memberPackages.length === 0 ? (
+                <p className="text-xs text-[#9898a8]">No packages for this member.</p>
+              ) : (
+                <ul className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                  {memberPackages.map((p) => (
+                    <li
+                      key={p.id}
+                      className="rounded-md border border-[rgba(212,175,55,0.12)] bg-[rgba(0,0,0,0.2)] px-2.5 py-2 text-[11px]"
+                    >
+                      <div className="flex flex-wrap items-baseline justify-between gap-1">
+                        <span className="font-medium text-[#e4e4e7]">{p.packageName}</span>
+                        <span
+                          className={
+                            p.status === 'active'
+                              ? 'text-[#86efac]'
+                              : p.status === 'capped'
+                                ? 'text-[#fcd34d]'
+                                : 'text-[#9898a8]'
+                          }
+                        >
+                          {p.status}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 text-[10px] text-[#9898a8]">
+                        ${p.amount.toFixed(2)} · {p.planType} ·{' '}
+                        <span className="font-mono text-[9px] text-[#6b6b7c]" title={p.id}>
+                          {p.id.length > 10 ? `${p.id.slice(0, 10)}…` : p.id}
+                        </span>
+                      </div>
+                      {p.status === 'active' ? (
+                        <label className="mt-2 flex cursor-pointer items-center gap-2 text-[10px] text-[#c4c4ce]">
+                          <input
+                            type="checkbox"
+                            className="accent-red-600"
+                            checked={p.adminRoiPaused}
+                            onChange={(e) => void setPackageRoiPaused(p.id, e.target.checked, sel.id)}
+                          />
+                          Pause daily ROI for this plan
+                        </label>
+                      ) : (
+                        <p className="mt-1.5 text-[10px] text-[#6b6b7c]">ROI accrual not running (not active).</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
             <div className="border-t border-zinc-900 pt-4 text-[11px] text-[#9898a8]">
               <p className="mb-1 font-semibold text-[#c4c4ce]">Wallets</p>
