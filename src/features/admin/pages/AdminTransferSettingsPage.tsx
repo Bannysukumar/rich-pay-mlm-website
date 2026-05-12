@@ -10,6 +10,7 @@ export function AdminTransferSettingsPage() {
   const { data, ready, save } = useLiveSiteConfig()
   const [peer, setPeer] = useState(true)
   const [income, setIncome] = useState(true)
+  const [transferToAnyMember, setTransferToAnyMember] = useState(false)
   const [fee, setFee] = useState('0')
   const [minAmt, setMinAmt] = useState('0')
   const [busy, setBusy] = useState(false)
@@ -18,6 +19,7 @@ export function AdminTransferSettingsPage() {
     if (!ready) return
     setPeer(data.allowPeerActivationTransfer !== false)
     setIncome(data.allowIncomeToActivation !== false)
+    setTransferToAnyMember(data.allowActivationTransferToAnyUser === true)
     setFee(String(Number(data.internalTransferFeePercent ?? 0)))
     setMinAmt(String(Number(data.minActivationTransfer ?? 0)))
   }, [data, ready])
@@ -28,10 +30,11 @@ export function AdminTransferSettingsPage() {
       await save({
         allowPeerActivationTransfer: peer,
         allowIncomeToActivation: income,
+        allowActivationTransferToAnyUser: transferToAnyMember,
         internalTransferFeePercent: Number(fee),
         minActivationTransfer: Number(minAmt),
       })
-      toast.success('Transfer matrix updated — enforce in Cloud Functions separately if required.')
+      toast.success('Transfer settings saved.')
     } catch {
       toast.error('Persist failed')
     } finally {
@@ -43,7 +46,7 @@ export function AdminTransferSettingsPage() {
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       <div>
         <h1 className="font-display text-2xl text-zinc-100">Transfer Settings</h1>
-        <p className="text-sm text-zinc-500">Feature flags surfaced to compliance — pair with callable validation Roadmap.</p>
+        <p className="text-sm text-zinc-500">Feature flags for member transfers and conversions (activation peer transfer rules are enforced in `internalTransfer`).</p>
       </div>
       <Card className="max-w-xl space-y-4 border-red-900/25 p-6">
         <label className="flex items-center gap-3 text-xs text-zinc-300">
@@ -53,6 +56,15 @@ export function AdminTransferSettingsPage() {
         <label className="flex items-center gap-3 text-xs text-zinc-300">
           <input type="checkbox" className="accent-red-600" checked={income} onChange={(e) => setIncome(e.target.checked)} />
           Allow income-wallet → activation migrations
+        </label>
+        <label className="flex items-center gap-3 text-xs text-zinc-300">
+          <input
+            type="checkbox"
+            className="accent-red-600"
+            checked={transferToAnyMember}
+            onChange={(e) => setTransferToAnyMember(e.target.checked)}
+          />
+          Activation transfers: allow any member UserID (off = direct referrals only; enforced in Cloud Functions)
         </label>
         <div>
           <Label>Symbolic transfer surcharge (%)</Label>

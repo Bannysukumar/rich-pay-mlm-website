@@ -220,6 +220,11 @@ export interface SiteSettings {
   tickerSymbols?: string[]
   /** Transfer / conversion guardrails surfaced in dashboards. */
   allowPeerActivationTransfer?: boolean
+  /**
+   * When true, activation-wallet peer transfers may go to any existing member UserID.
+   * When false or unset, recipient must be the caller’s direct referral (sponsorUid === caller).
+   */
+  allowActivationTransferToAnyUser?: boolean
   allowIncomeToActivation?: boolean
   internalTransferFeePercent?: number
   minActivationTransfer?: number

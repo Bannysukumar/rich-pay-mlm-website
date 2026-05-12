@@ -1359,7 +1359,8 @@ exports.convertIncomeToActivation = (0, https_1.onCall)(callableRuntimeOpts, asy
 });
 /**
  * Peer transfer: caller’s activation wallet → recipient’s activation wallet (Ki Transfer form).
- * Recipient must be a direct referral (sponsor chain), not self.
+ * Recipient must exist. Unless `siteSettings.config.allowActivationTransferToAnyUser` is true,
+ * recipient must be a direct referral (sponsorUid === caller). Not self.
  */
 exports.internalTransfer = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
     if (!request.auth?.uid)
@@ -1396,9 +1397,13 @@ exports.internalTransfer = (0, https_1.onCall)(callableRuntimeOpts, async (reque
     const beneSnap = await db.collection(COL_USERS).doc(recipientUid).get();
     if (!beneSnap.exists)
         throw new https_1.HttpsError('not-found', 'Member not found');
-    const sponsorOfRecip = beneSnap.data()?.sponsorUid;
-    if (sponsorOfRecip !== uid) {
-        throw new https_1.HttpsError('permission-denied', 'You can only transfer to your direct referrals');
+    const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get();
+    const transferToAnyMember = Boolean(settingsSnap.data()?.allowActivationTransferToAnyUser);
+    if (!transferToAnyMember) {
+        const sponsorOfRecip = beneSnap.data()?.sponsorUid;
+        if (sponsorOfRecip !== uid) {
+            throw new https_1.HttpsError('permission-denied', 'You can only transfer to your direct referrals');
+        }
     }
     const transferRef = db.collection(COL_INTERNAL).doc();
     await db.runTransaction(async (tx) => {

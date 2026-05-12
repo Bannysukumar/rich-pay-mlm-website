@@ -3,9 +3,11 @@ import type { FormEvent } from 'react'
 import toast from 'react-hot-toast'
 import { internalTransferCallable, resolveUsernameCallable } from '@/lib/api/financeCallables'
 import { useAuthState } from '@/hooks/useAuth'
+import { useSiteSettings } from '@/hooks/useSiteSettings'
 
 export function TransferPage() {
   const { profile } = useAuthState()
+  const { settings, loaded: settingsLoaded } = useSiteSettings()
   const [transferto, setTransferto] = useState('')
   const [rname, setRname] = useState('')
   const [epoints, setEpoints] = useState('')
@@ -73,6 +75,13 @@ export function TransferPage() {
                 <h4 className="card-title">Balance (Activation $ {activation.toFixed(2)})</h4>
               </div>
               <div className="card-body">
+                {settingsLoaded ? (
+                  <p className="text-muted small mb-3">
+                    {settings.allowActivationTransferToAnyUser
+                      ? 'Transfers may go to any member with a valid UserID (recipient must exist). You cannot transfer to yourself.'
+                      : 'You can only transfer to your direct referrals. The UserID must exist in the system.'}
+                  </p>
+                ) : null}
                 <div className="basic-form">
                   <form name="form1" method="post" onSubmit={(ev) => void submit(ev)}>
                     <div className="mb-3 col-md-12">

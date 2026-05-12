@@ -36,6 +36,8 @@ const defaults: SiteSettings = {
   roiEnabled: true,
   roiProcessHourUtc: 0,
   allowPeerActivationTransfer: true,
+  /** When false, activation transfers are limited to direct referrals (server-enforced). */
+  allowActivationTransferToAnyUser: false,
   allowIncomeToActivation: true,
   internalTransferFeePercent: 0,
   minActivationTransfer: 0,
@@ -138,6 +140,10 @@ export function useSiteSettings() {
             d.allowPeerActivationTransfer !== undefined
               ? Boolean(d.allowPeerActivationTransfer)
               : defaults.allowPeerActivationTransfer,
+          allowActivationTransferToAnyUser:
+            d.allowActivationTransferToAnyUser !== undefined
+              ? Boolean(d.allowActivationTransferToAnyUser)
+              : defaults.allowActivationTransferToAnyUser,
           allowIncomeToActivation:
             d.allowIncomeToActivation !== undefined
               ? Boolean(d.allowIncomeToActivation)
