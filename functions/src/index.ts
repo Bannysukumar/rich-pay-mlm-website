@@ -1946,6 +1946,129 @@ export const adminRepairWalletShadowFields = onCall(callableRuntimeOpts, async (
   return { ok: true, repaired: merged.length > 0, mergedLeaves: merged }
 })
 
+/** Which user balance field to adjust (Firestore paths, nested wallets use dot notation for increment updates). */
+const ADMIN_ADJUST_BALANCE_FIELDS = [
+  'wallet_deposit',
+  'wallet_activation',
+  'wallet_cash',
+  'nonWorkingIncomeBalance',
+  'workingIncomeBalance',
+  'userTotals_totalWorkingIncome',
+  'sponsorBonusTotal',
+  'dailyProfitsTotal',
+  'teamLevelCommissionTotal',
+  'rankCommissionTotal',
+] as const
+
+type AdminAdjustBalanceField = (typeof ADMIN_ADJUST_BALANCE_FIELDS)[number]
+
+function adminAdjustBalanceFirestorePath(field: AdminAdjustBalanceField): string {
+  switch (field) {
+    case 'wallet_deposit':
+      return 'wallets.deposit'
+    case 'wallet_activation':
+      return 'wallets.activation'
+    case 'wallet_cash':
+      return 'wallets.cash'
+    case 'nonWorkingIncomeBalance':
+      return 'nonWorkingIncomeBalance'
+    case 'workingIncomeBalance':
+      return 'workingIncomeBalance'
+    case 'userTotals_totalWorkingIncome':
+      return 'userTotals.totalWorkingIncome'
+    case 'sponsorBonusTotal':
+      return 'sponsorBonusTotal'
+    case 'dailyProfitsTotal':
+      return 'dailyProfitsTotal'
+    case 'teamLevelCommissionTotal':
+      return 'teamLevelCommissionTotal'
+    case 'rankCommissionTotal':
+      return 'rankCommissionTotal'
+    default: {
+      const _exhaustive: never = field
+      throw new Error(`Unhandled balance field: ${String(_exhaustive)}`)
+    }
+  }
+}
+
+function readAdminAdjustableBalance(snap: DocumentSnapshot, field: AdminAdjustBalanceField): number {
+  const d = snap.data()
+  if (!d) return 0
+  switch (field) {
+    case 'wallet_deposit':
+      return Number((d.wallets as Record<string, unknown> | undefined)?.deposit ?? 0)
+    case 'wallet_activation':
+      return Number((d.wallets as Record<string, unknown> | undefined)?.activation ?? 0)
+    case 'wallet_cash':
+      return Number((d.wallets as Record<string, unknown> | undefined)?.cash ?? 0)
+    case 'nonWorkingIncomeBalance':
+      return Number(d.nonWorkingIncomeBalance ?? 0)
+    case 'workingIncomeBalance':
+      return Number(d.workingIncomeBalance ?? 0)
+    case 'userTotals_totalWorkingIncome':
+      return Number((d.userTotals as Record<string, unknown> | undefined)?.totalWorkingIncome ?? 0)
+    case 'sponsorBonusTotal':
+      return Number(d.sponsorBonusTotal ?? 0)
+    case 'dailyProfitsTotal':
+      return Number(d.dailyProfitsTotal ?? 0)
+    case 'teamLevelCommissionTotal':
+      return Number(d.teamLevelCommissionTotal ?? 0)
+    case 'rankCommissionTotal':
+      return Number(d.rankCommissionTotal ?? 0)
+    default: {
+      const _exhaustive: never = field
+      void _exhaustive
+      return 0
+    }
+  }
+}
+
+/**
+ * Admin-only: apply a signed delta to one numeric balance field on a member (`users/{userId}`).
+ * Prevents resulting values below zero. Audited.
+ */
+export const adminAdjustMemberBalances = onCall(callableRuntimeOpts, async (request) => {
+  if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')
+  const actorUid = request.auth.uid
+  await assertFirestoreAdmin(actorUid)
+
+  const data = request.data as { userId?: string; field?: string; delta?: number }
+  const userId = String(data.userId ?? '').trim()
+  const fieldRaw = String(data.field ?? '').trim()
+  const delta = Number(data.delta)
+
+  if (!userId) throw new HttpsError('invalid-argument', 'userId is required')
+  if (!ADMIN_ADJUST_BALANCE_FIELDS.includes(fieldRaw as AdminAdjustBalanceField)) {
+    throw new HttpsError('invalid-argument', 'Invalid balance field')
+  }
+  const field = fieldRaw as AdminAdjustBalanceField
+  if (!Number.isFinite(delta) || delta === 0) {
+    throw new HttpsError('invalid-argument', 'delta must be a non-zero finite number')
+  }
+  if (Math.abs(delta) > 1e12) {
+    throw new HttpsError('invalid-argument', 'delta out of allowed range')
+  }
+
+  const ref = db.collection(COL_USERS).doc(userId)
+  const path = adminAdjustBalanceFirestorePath(field)
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists) throw new HttpsError('not-found', 'User not found')
+    const cur = readAdminAdjustableBalance(snap, field)
+    if (cur + delta < -1e-9) {
+      throw new HttpsError('failed-precondition', 'Adjustment would make balance negative')
+    }
+    tx.update(ref, {
+      [path]: FieldValue.increment(delta),
+      updatedAt: Date.now(),
+    } as Record<string, unknown>)
+  })
+
+  await audit(actorUid, 'adminAdjustMemberBalances', { userId, field, delta })
+  return { ok: true }
+})
+
 /** Push the same notification document to every user (batched). */
 export const adminBroadcastNotification = onCall(callableRuntimeOpts, async (request) => {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')

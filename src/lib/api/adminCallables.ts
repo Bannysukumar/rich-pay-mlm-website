@@ -1,5 +1,28 @@
 import { getHttpsCallable } from '@/lib/api/httpsCallableHelper'
 
+/** Must match `ADMIN_ADJUST_BALANCE_FIELDS` in Cloud Functions `adminAdjustMemberBalances`. */
+export type AdminAdjustMemberBalanceField =
+  | 'wallet_deposit'
+  | 'wallet_activation'
+  | 'wallet_cash'
+  | 'nonWorkingIncomeBalance'
+  | 'workingIncomeBalance'
+  | 'userTotals_totalWorkingIncome'
+  | 'sponsorBonusTotal'
+  | 'dailyProfitsTotal'
+  | 'teamLevelCommissionTotal'
+  | 'rankCommissionTotal'
+
+export async function adminAdjustMemberBalancesCallable(payload: {
+  userId: string
+  field: AdminAdjustMemberBalanceField
+  delta: number
+}): Promise<{ ok: boolean }> {
+  const fn = getHttpsCallable('adminAdjustMemberBalances')
+  const res = await fn(payload)
+  return res.data as { ok: boolean }
+}
+
 export async function adminWithdrawalUpdateCallable(payload: {
   withdrawalId: string
   next: 'processing' | 'approved' | 'rejected' | 'paid'

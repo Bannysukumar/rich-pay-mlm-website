@@ -79,6 +79,10 @@
         "function": { "functionName": "adminRepairWalletShadowFields", "region": "us-central1" }
       },
       {
+        "source": "/api/call/adminAdjustMemberBalances",
+        "function": { "functionName": "adminAdjustMemberBalances", "region": "us-central1" }
+      },
+      {
         "source": "/api/call/adminBroadcastNotification",
         "function": { "functionName": "adminBroadcastNotification", "region": "us-central1" }
       },

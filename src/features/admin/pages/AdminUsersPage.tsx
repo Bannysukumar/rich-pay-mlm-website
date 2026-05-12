@@ -1,7 +1,6 @@
 import {
   collection,
   doc,
-  increment,
   limit,
   onSnapshot,
   orderBy,
@@ -16,6 +15,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input, Label } from '@/components/ui/Input'
 import { pushAuditLog } from '@/lib/admin/pushAuditLog'
+import { adminAdjustMemberBalancesCallable, type AdminAdjustMemberBalanceField } from '@/lib/api/adminCallables'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 import type { UserRole } from '@/types/models'
@@ -31,6 +31,13 @@ type Row = {
   blocked: boolean
   sponsorUsername: string
   wallets: { deposit: number; activation: number; cash: number }
+  nonWorkingIncomeBalance: number
+  workingIncomeBalance: number
+  totalWorkingIncome: number
+  sponsorBonusTotal: number
+  dailyProfitsTotal: number
+  teamLevelCommissionTotal: number
+  rankCommissionTotal: number
   createdAt: number
   /** Plaintext login password — only present if historically stored on the user doc (not default). */
   storedLoginPassword: string | null
@@ -134,6 +141,15 @@ export function AdminUsersPage() {
               activation: Number(w.activation ?? 0),
               cash: Number(w.cash ?? 0),
             },
+            nonWorkingIncomeBalance: Number(d.nonWorkingIncomeBalance ?? 0),
+            workingIncomeBalance: Number(d.workingIncomeBalance ?? 0),
+            totalWorkingIncome: Number(
+              (d.userTotals as Record<string, unknown> | undefined)?.totalWorkingIncome ?? 0,
+            ),
+            sponsorBonusTotal: Number(d.sponsorBonusTotal ?? 0),
+            dailyProfitsTotal: Number(d.dailyProfitsTotal ?? 0),
+            teamLevelCommissionTotal: Number(d.teamLevelCommissionTotal ?? 0),
+            rankCommissionTotal: Number(d.rankCommissionTotal ?? 0),
             createdAt: Number(d.createdAt ?? 0),
             storedLoginPassword: readStoredPassword(d),
           })
@@ -176,21 +192,30 @@ export function AdminUsersPage() {
     e.preventDefault()
     if (!sel) return
     const fd = new FormData(e.currentTarget as HTMLFormElement)
-    const wallet = String(fd.get('wallet') || '')
+    const field = String(fd.get('wallet') || '') as AdminAdjustMemberBalanceField
     const raw = Number(fd.get('delta') || 0)
-    if (!['deposit', 'activation', 'cash'].includes(wallet) || raw === 0) {
-      toast.error('Pick wallet and non-zero delta')
+    const allowed: AdminAdjustMemberBalanceField[] = [
+      'wallet_deposit',
+      'wallet_activation',
+      'wallet_cash',
+      'nonWorkingIncomeBalance',
+      'workingIncomeBalance',
+      'userTotals_totalWorkingIncome',
+      'sponsorBonusTotal',
+      'dailyProfitsTotal',
+      'teamLevelCommissionTotal',
+      'rankCommissionTotal',
+    ]
+    if (!allowed.includes(field) || raw === 0) {
+      toast.error('Pick a balance field and a non-zero delta')
       return
     }
     try {
-      await updateDoc(doc(db, COLLECTIONS.users, sel.id), {
-        [`wallets.${wallet}`]: increment(raw),
-        updatedAt: Date.now(),
-      })
-      await pushAuditLog('adminWalletAdjust', { userId: sel.id, wallet, delta: raw })
+      await adminAdjustMemberBalancesCallable({ userId: sel.id, field, delta: raw })
+      await pushAuditLog('adminWalletAdjust', { userId: sel.id, field, delta: raw })
       toast.success('Balance adjusted')
     } catch {
-      toast.error('Could not adjust balance')
+      toast.error('Could not adjust balance (check permissions, delta, and deploy functions)')
     }
   }
 
@@ -357,26 +382,45 @@ export function AdminUsersPage() {
             </form>
 
             <div className="border-t border-zinc-900 pt-4 text-[11px] text-[#9898a8]">
+              <p className="mb-1 font-semibold text-[#c4c4ce]">Wallets</p>
               <div>Deposit: ${sel.wallets.deposit.toFixed(2)}</div>
               <div>Activation: ${sel.wallets.activation.toFixed(2)}</div>
               <div>Cash: ${sel.wallets.cash.toFixed(2)}</div>
+              <p className="mb-1 mt-3 font-semibold text-[#c4c4ce]">Income / caps</p>
+              <div>Non-working income bal.: ${sel.nonWorkingIncomeBalance.toFixed(2)}</div>
+              <div>Working income bal.: ${sel.workingIncomeBalance.toFixed(2)}</div>
+              <div>Total working income (cap track): ${sel.totalWorkingIncome.toFixed(2)}</div>
+              <p className="mb-1 mt-3 font-semibold text-[#c4c4ce]">Cumulative totals (ledger)</p>
+              <div>Sponsor bonus total: ${sel.sponsorBonusTotal.toFixed(2)}</div>
+              <div>Daily profits total: ${sel.dailyProfitsTotal.toFixed(2)}</div>
+              <div>Team level total: ${sel.teamLevelCommissionTotal.toFixed(2)}</div>
+              <div>Rank commission total: ${sel.rankCommissionTotal.toFixed(2)}</div>
             </div>
 
             <form className="grid gap-2 border-t border-zinc-900 pt-4 text-xs" onSubmit={walletDelta}>
-              <Label>Ledger adjustment (+/- USDT)</Label>
+              <Label>Balance adjustment (+/- USDT)</Label>
               <select
                 name="wallet"
                 className="rounded-md border border-zinc-800 bg-[#09090b] px-2 py-1.5 text-zinc-200"
               >
-                <option value="deposit">Deposit wallet</option>
-                <option value="activation">Activation wallet</option>
-                <option value="cash">Cash wallet</option>
+                <option value="wallet_deposit">Deposit wallet</option>
+                <option value="wallet_activation">Activation wallet</option>
+                <option value="wallet_cash">Cash wallet</option>
+                <option value="nonWorkingIncomeBalance">Non-working income balance</option>
+                <option value="workingIncomeBalance">Working income balance</option>
+                <option value="userTotals_totalWorkingIncome">Total working income (3× cap counter)</option>
+                <option value="sponsorBonusTotal">Sponsor bonus (cumulative)</option>
+                <option value="dailyProfitsTotal">Daily profits (cumulative)</option>
+                <option value="teamLevelCommissionTotal">Team level bonus (cumulative)</option>
+                <option value="rankCommissionTotal">Rank bonus (cumulative)</option>
               </select>
               <Input name="delta" type="number" step="0.01" placeholder="e.g. 25 or -10" />
               <Button type="submit" variant="outline">
                 Apply delta
               </Button>
-              <p className="text-[10px] text-[#6b6b7c]">Creates no automatic notification — follow up manually if needed.</p>
+              <p className="text-[10px] text-[#6b6b7c]">
+                Server-validated; cannot drive a balance negative. Deploy <code className="text-[#a8a8b8]">adminAdjustMemberBalances</code> for production. No automatic member notification.
+              </p>
             </form>
           </>
         )}
