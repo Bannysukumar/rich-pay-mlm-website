@@ -7,9 +7,12 @@ import {
   walletConvertCallable,
 } from '@/lib/api/financeCallables'
 import { useAuthState } from '@/hooks/useAuth'
+import { useSiteSettings } from '@/hooks/useSiteSettings'
 
 export function ConvertPage() {
   const { profile } = useAuthState()
+  const { settings } = useSiteSettings()
+  const showDepositToActivation = settings.depositToActivationConvertEnabled !== false
   const [depositToActAmount, setDepositToActAmount] = useState('')
   const [depositBusy, setDepositBusy] = useState(false)
   const [transferto, setTransferto] = useState('')
@@ -102,41 +105,43 @@ export function ConvertPage() {
       <div className="container-fluid">
         <div className="row">
           <div className="col-xl-12 col-lg-12">
-            <div className="card mb-4">
-              <div className="card-header">
-                <h4 className="card-title">
-                  Deposit → Activation (Deposit $ {deposit.toFixed(2)} · Activation $ {activation.toFixed(2)})
-                </h4>
+            {showDepositToActivation ? (
+              <div className="card mb-4">
+                <div className="card-header">
+                  <h4 className="card-title">
+                    Deposit → Activation (Deposit $ {deposit.toFixed(2)} · Activation $ {activation.toFixed(2)})
+                  </h4>
+                </div>
+                <div className="card-body">
+                  <p className="small text-secondary mb-3">
+                    Approved deposits land in your <strong>Deposit Wallet</strong>. Package top-ups are deducted from{' '}
+                    <strong>Activation Wallet</strong> — move USDT here first, then use{' '}
+                    <strong>Package → Topup</strong>.
+                  </p>
+                  <form className="basic-form" onSubmit={(ev) => void submitDepositToActivation(ev)}>
+                    <div className="mb-3 col-md-12">
+                      <label className="form-label" htmlFor="dep-to-act">
+                        USDT to move
+                      </label>
+                      <input
+                        id="dep-to-act"
+                        type="number"
+                        className="form-control input-default"
+                        placeholder="Amount"
+                        min={0}
+                        step="0.0001"
+                        value={depositToActAmount}
+                        onChange={(e) => setDepositToActAmount(e.target.value)}
+                        disabled={depositBusy}
+                      />
+                    </div>
+                    <button type="submit" className="btn btn-primary" disabled={depositBusy}>
+                      {depositBusy ? 'Please wait…' : 'Move to Activation Wallet'}
+                    </button>
+                  </form>
+                </div>
               </div>
-              <div className="card-body">
-                <p className="small text-secondary mb-3">
-                  Approved deposits land in your <strong>Deposit Wallet</strong>. Package top-ups are deducted from{' '}
-                  <strong>Activation Wallet</strong> — move USDT here first, then use{' '}
-                  <strong>Package → Topup</strong>.
-                </p>
-                <form className="basic-form" onSubmit={(ev) => void submitDepositToActivation(ev)}>
-                  <div className="mb-3 col-md-12">
-                    <label className="form-label" htmlFor="dep-to-act">
-                      USDT to move
-                    </label>
-                    <input
-                      id="dep-to-act"
-                      type="number"
-                      className="form-control input-default"
-                      placeholder="Amount"
-                      min={0}
-                      step="0.0001"
-                      value={depositToActAmount}
-                      onChange={(e) => setDepositToActAmount(e.target.value)}
-                      disabled={depositBusy}
-                    />
-                  </div>
-                  <button type="submit" className="btn btn-primary" disabled={depositBusy}>
-                    {depositBusy ? 'Please wait…' : 'Move to Activation Wallet'}
-                  </button>
-                </form>
-              </div>
-            </div>
+            ) : null}
 
             <div className="card">
               <div className="card-header">

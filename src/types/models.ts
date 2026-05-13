@@ -235,6 +235,11 @@ export interface SiteSettings {
    */
   allowActivationTransferToAnyUser?: boolean
   allowIncomeToActivation?: boolean
+  /**
+   * When false, members do not see the Deposit → Activation block on `/dashboard/wallet/convert`
+   * and `walletConvert` rejects deposit→activation.
+   */
+  depositToActivationConvertEnabled?: boolean
   internalTransferFeePercent?: number
   minActivationTransfer?: number
   /** Optional marketing copy for public `/plans` (plain text). */

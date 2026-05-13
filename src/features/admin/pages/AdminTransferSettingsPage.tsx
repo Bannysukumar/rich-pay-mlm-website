@@ -10,6 +10,7 @@ export function AdminTransferSettingsPage() {
   const { data, ready, save } = useLiveSiteConfig()
   const [peer, setPeer] = useState(true)
   const [income, setIncome] = useState(true)
+  const [depositToActivation, setDepositToActivation] = useState(true)
   const [transferToAnyMember, setTransferToAnyMember] = useState(false)
   const [fee, setFee] = useState('0')
   const [minAmt, setMinAmt] = useState('0')
@@ -19,6 +20,7 @@ export function AdminTransferSettingsPage() {
     if (!ready) return
     setPeer(data.allowPeerActivationTransfer !== false)
     setIncome(data.allowIncomeToActivation !== false)
+    setDepositToActivation(data.depositToActivationConvertEnabled !== false)
     setTransferToAnyMember(data.allowActivationTransferToAnyUser === true)
     setFee(String(Number(data.internalTransferFeePercent ?? 0)))
     setMinAmt(String(Number(data.minActivationTransfer ?? 0)))
@@ -30,6 +32,7 @@ export function AdminTransferSettingsPage() {
       await save({
         allowPeerActivationTransfer: peer,
         allowIncomeToActivation: income,
+        depositToActivationConvertEnabled: depositToActivation,
         allowActivationTransferToAnyUser: transferToAnyMember,
         internalTransferFeePercent: Number(fee),
         minActivationTransfer: Number(minAmt),
@@ -56,6 +59,15 @@ export function AdminTransferSettingsPage() {
         <label className="flex items-center gap-3 text-xs text-zinc-300">
           <input type="checkbox" className="accent-red-600" checked={income} onChange={(e) => setIncome(e.target.checked)} />
           Allow income-wallet → activation migrations
+        </label>
+        <label className="flex items-center gap-3 text-xs text-zinc-300">
+          <input
+            type="checkbox"
+            className="accent-red-600"
+            checked={depositToActivation}
+            onChange={(e) => setDepositToActivation(e.target.checked)}
+          />
+          Convert page: show Deposit → Activation (move deposit balance to activation wallet)
         </label>
         <label className="flex items-center gap-3 text-xs text-zinc-300">
           <input

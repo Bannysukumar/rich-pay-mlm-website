@@ -1490,6 +1490,13 @@ export const walletConvert = onCall(callableRuntimeOpts, async (request) => {
     throw new HttpsError('failed-precondition', 'Conversion path not permitted')
   }
 
+  if (from === 'deposit' && to === 'activation') {
+    const cfgSnap = await db.collection(COL_SETTINGS).doc('config').get()
+    if (cfgSnap.exists && cfgSnap.data()?.depositToActivationConvertEnabled === false) {
+      throw new HttpsError('failed-precondition', 'Deposit → Activation conversion is disabled')
+    }
+  }
+
   await db.runTransaction(async (tx) => {
     const uRef = db.collection(COL_USERS).doc(uid)
     const uSnap = await tx.get(uRef)
