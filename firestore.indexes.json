@@ -1,6 +1,11 @@
 {
   "indexes": [
     {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [{ "fieldPath": "createdAt", "order": "DESCENDING" }]
+    },
+    {
       "collectionGroup": "deposits",
       "queryScope": "COLLECTION",
       "fields": [

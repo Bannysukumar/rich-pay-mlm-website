@@ -23,6 +23,12 @@ export async function adminAdjustMemberBalancesCallable(payload: {
   return res.data as { ok: boolean }
 }
 
+export async function adminDeleteMemberCallable(payload: { userId: string }): Promise<{ ok: boolean }> {
+  const fn = getHttpsCallable('adminDeleteMember')
+  const res = await fn(payload)
+  return res.data as { ok: boolean }
+}
+
 export async function adminWithdrawalUpdateCallable(payload: {
   withdrawalId: string
   next: 'processing' | 'approved' | 'rejected' | 'paid'

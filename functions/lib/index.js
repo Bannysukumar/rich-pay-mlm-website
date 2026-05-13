@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
+exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.adminDeleteMember = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
 const node_crypto_1 = require("node:crypto");
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -1818,6 +1818,60 @@ exports.adminAdjustMemberBalances = (0, https_1.onCall)(callableRuntimeOpts, asy
         });
     });
     await audit(actorUid, 'adminAdjustMemberBalances', { userId, field, delta });
+    return { ok: true };
+});
+/**
+ * Permanently remove a member: `users/{uid}`, `usersByUsername/{username}`, matching `phoneIndex`,
+ * and Firebase Auth user. Cannot delete yourself or an account that still has `role: admin`.
+ */
+exports.adminDeleteMember = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
+    if (!request.auth?.uid)
+        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
+    const actorUid = request.auth.uid;
+    await assertFirestoreAdmin(actorUid);
+    const targetUid = String(request.data?.userId ?? '').trim();
+    if (!targetUid)
+        throw new https_1.HttpsError('invalid-argument', 'userId is required');
+    if (targetUid === actorUid) {
+        throw new https_1.HttpsError('permission-denied', 'You cannot delete your own administrator account');
+    }
+    const uRef = db.collection(COL_USERS).doc(targetUid);
+    const uSnap = await uRef.get();
+    if (!uSnap.exists)
+        throw new https_1.HttpsError('not-found', 'User not found');
+    const d = uSnap.data();
+    if (String(d.role ?? '') === 'admin') {
+        throw new https_1.HttpsError('failed-precondition', 'Change this user’s role from Admin to Member before deleting the account');
+    }
+    const username = String(d.username ?? '').trim();
+    const phone = String(d.phone ?? '').trim().replace(/\s+/g, '');
+    const batch = db.batch();
+    batch.delete(uRef);
+    if (username) {
+        const mapRef = db.collection(COL_USERS_BY_UN).doc(username);
+        const mapSnap = await mapRef.get();
+        if (mapSnap.exists && String(mapSnap.data()?.uid ?? '') === targetUid) {
+            batch.delete(mapRef);
+        }
+    }
+    if (phone.length >= 8) {
+        const phoneRef = db.collection(COL_PHONE).doc(phone);
+        const phoneSnap = await phoneRef.get();
+        if (phoneSnap.exists && String(phoneSnap.data()?.uid ?? '') === targetUid) {
+            batch.delete(phoneRef);
+        }
+    }
+    await batch.commit();
+    try {
+        await admin.auth().deleteUser(targetUid);
+    }
+    catch (e) {
+        const code = e && typeof e === 'object' && 'code' in e ? String(e.code) : '';
+        if (!code.includes('user-not-found')) {
+            throw new https_1.HttpsError('internal', 'Firestore data removed but Firebase Auth delete failed — check Auth console');
+        }
+    }
+    await audit(actorUid, 'adminDeleteMember', { deletedUid: targetUid, username, phone: phone || undefined });
     return { ok: true };
 });
 /** Push the same notification document to every user (batched). */

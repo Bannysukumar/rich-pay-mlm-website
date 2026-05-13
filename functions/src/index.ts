@@ -2069,6 +2069,70 @@ export const adminAdjustMemberBalances = onCall(callableRuntimeOpts, async (requ
   return { ok: true }
 })
 
+/**
+ * Permanently remove a member: `users/{uid}`, `usersByUsername/{username}`, matching `phoneIndex`,
+ * and Firebase Auth user. Cannot delete yourself or an account that still has `role: admin`.
+ */
+export const adminDeleteMember = onCall(callableRuntimeOpts, async (request) => {
+  if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')
+  const actorUid = request.auth.uid
+  await assertFirestoreAdmin(actorUid)
+
+  const targetUid = String((request.data as { userId?: string })?.userId ?? '').trim()
+  if (!targetUid) throw new HttpsError('invalid-argument', 'userId is required')
+  if (targetUid === actorUid) {
+    throw new HttpsError('permission-denied', 'You cannot delete your own administrator account')
+  }
+
+  const uRef = db.collection(COL_USERS).doc(targetUid)
+  const uSnap = await uRef.get()
+  if (!uSnap.exists) throw new HttpsError('not-found', 'User not found')
+
+  const d = uSnap.data()!
+  if (String(d.role ?? '') === 'admin') {
+    throw new HttpsError(
+      'failed-precondition',
+      'Change this user’s role from Admin to Member before deleting the account',
+    )
+  }
+
+  const username = String(d.username ?? '').trim()
+  const phone = String(d.phone ?? '').trim().replace(/\s+/g, '')
+
+  const batch = db.batch()
+  batch.delete(uRef)
+
+  if (username) {
+    const mapRef = db.collection(COL_USERS_BY_UN).doc(username)
+    const mapSnap = await mapRef.get()
+    if (mapSnap.exists && String(mapSnap.data()?.uid ?? '') === targetUid) {
+      batch.delete(mapRef)
+    }
+  }
+
+  if (phone.length >= 8) {
+    const phoneRef = db.collection(COL_PHONE).doc(phone)
+    const phoneSnap = await phoneRef.get()
+    if (phoneSnap.exists && String(phoneSnap.data()?.uid ?? '') === targetUid) {
+      batch.delete(phoneRef)
+    }
+  }
+
+  await batch.commit()
+
+  try {
+    await admin.auth().deleteUser(targetUid)
+  } catch (e: unknown) {
+    const code = e && typeof e === 'object' && 'code' in e ? String((e as { code: string }).code) : ''
+    if (!code.includes('user-not-found')) {
+      throw new HttpsError('internal', 'Firestore data removed but Firebase Auth delete failed — check Auth console')
+    }
+  }
+
+  await audit(actorUid, 'adminDeleteMember', { deletedUid: targetUid, username, phone: phone || undefined })
+  return { ok: true }
+})
+
 /** Push the same notification document to every user (batched). */
 export const adminBroadcastNotification = onCall(callableRuntimeOpts, async (request) => {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')

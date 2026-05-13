@@ -6,6 +6,7 @@ import { RegisterPage } from '@/features/auth/RegisterPage'
 import { RegisterSuccessPage } from '@/features/auth/RegisterSuccessPage'
 import { AdminLayout } from '@/features/admin/layout/AdminLayout'
 import { AdminHome } from '@/features/admin/pages/AdminHome'
+import { AdminIncomeLedgersHubPage } from '@/features/admin/pages/AdminIncomeLedgersHubPage'
 import { AdminAuditPage } from '@/features/admin/pages/AdminAuditPage'
 import { AdminCmsPage } from '@/features/admin/pages/AdminCmsPage'
 import { AdminDepositsPage } from '@/features/admin/pages/AdminDepositsPage'
@@ -13,7 +14,14 @@ import { AdminMaintenancePage } from '@/features/admin/pages/AdminMaintenancePag
 import { AdminNotificationsPage } from '@/features/admin/pages/AdminNotificationsPage'
 import { AdminPackagesPage } from '@/features/admin/pages/AdminPackagesPage'
 import { AdminQrPage } from '@/features/admin/pages/AdminQrPage'
+import { AdminRegistrationsTodayPage } from '@/features/admin/pages/AdminRegistrationsTodayPage'
 import { AdminRanksPage } from '@/features/admin/pages/AdminRanksPage'
+import { AdminReportActivePackagesPage } from '@/features/admin/pages/AdminReportActivePackagesPage'
+import { AdminReportBalanceAdjustmentsPage } from '@/features/admin/pages/AdminReportBalanceAdjustmentsPage'
+import { AdminReportDailyRoiPage } from '@/features/admin/pages/AdminReportDailyRoiPage'
+import { AdminReportRankBonusPage } from '@/features/admin/pages/AdminReportRankBonusPage'
+import { AdminReportSponsorBonusPage } from '@/features/admin/pages/AdminReportSponsorBonusPage'
+import { AdminReportTeamLevelIncomePage } from '@/features/admin/pages/AdminReportTeamLevelIncomePage'
 import { AdminReportsPage } from '@/features/admin/pages/AdminReportsPage'
 import { AdminRoiPage } from '@/features/admin/pages/AdminRoiPage'
 import { AdminSeoPage } from '@/features/admin/pages/AdminSeoPage'
@@ -22,6 +30,8 @@ import { AdminSponsorPage } from '@/features/admin/pages/AdminSponsorPage'
 import { AdminTeamLevelsPage } from '@/features/admin/pages/AdminTeamLevelsPage'
 import { AdminTicketsPage } from '@/features/admin/pages/AdminTicketsPage'
 import { AdminTransferSettingsPage } from '@/features/admin/pages/AdminTransferSettingsPage'
+import { AdminMemberBalanceAdjustPage } from '@/features/admin/pages/AdminMemberBalanceAdjustPage'
+import { AdminMemberInvestmentPlansPage } from '@/features/admin/pages/AdminMemberInvestmentPlansPage'
 import { AdminUsersPage } from '@/features/admin/pages/AdminUsersPage'
 import { AdminWalletSettingsPage } from '@/features/admin/pages/AdminWalletSettingsPage'
 import { AdminWithdrawalsPage } from '@/features/admin/pages/AdminWithdrawalsPage'
@@ -169,6 +179,9 @@ export function AppRouter() {
       >
         <Route index element={<AdminHome />} />
         <Route path="users" element={<AdminUsersPage />} />
+        <Route path="registrations-today" element={<AdminRegistrationsTodayPage />} />
+        <Route path="member-investment-plans" element={<AdminMemberInvestmentPlansPage />} />
+        <Route path="member-balance-adjust" element={<AdminMemberBalanceAdjustPage />} />
         <Route path="deposits" element={<AdminDepositsPage />} />
         <Route path="withdrawals" element={<AdminWithdrawalsPage />} />
         <Route path="packages" element={<AdminPackagesPage />} />
@@ -185,6 +198,13 @@ export function AppRouter() {
         <Route path="seo" element={<AdminSeoPage />} />
         <Route path="site" element={<AdminSiteSettings />} />
         <Route path="reports" element={<AdminReportsPage />} />
+        <Route path="income-ledgers" element={<AdminIncomeLedgersHubPage />} />
+        <Route path="reports/balance-adjustments" element={<AdminReportBalanceAdjustmentsPage />} />
+        <Route path="reports/income-daily-roi" element={<AdminReportDailyRoiPage />} />
+        <Route path="reports/income-sponsor" element={<AdminReportSponsorBonusPage />} />
+        <Route path="reports/income-team-level" element={<AdminReportTeamLevelIncomePage />} />
+        <Route path="reports/income-rank" element={<AdminReportRankBonusPage />} />
+        <Route path="reports/active-packages" element={<AdminReportActivePackagesPage />} />
         <Route path="audit" element={<AdminAuditPage />} />
         <Route path="maintenance" element={<AdminMaintenancePage />} />
       </Route>

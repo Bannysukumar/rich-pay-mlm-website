@@ -28,3 +28,15 @@ export function toCsv(headers: string[], rows: (string | number)[][]) {
   const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`
   return [headers.map(esc).join(','), ...rows.map((r) => r.map(esc).join(','))].join('\n')
 }
+
+/** UTF-8 BOM so Excel recognizes encoding; saves as `.csv` (opens in Excel). */
+export function downloadExcelCsv(filenameBase: string, headers: string[], rows: (string | number)[][]) {
+  const csv = `\uFEFF${toCsv(headers, rows)}`
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${filenameBase.replace(/[^a-z0-9-_]+/gi, '-').toLowerCase() || 'export'}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}

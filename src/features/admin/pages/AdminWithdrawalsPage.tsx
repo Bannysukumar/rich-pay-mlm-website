@@ -11,10 +11,13 @@ import {
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
 import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
 import { Input, Label } from '@/components/ui/Input'
 import { adminWithdrawalUpdateCallable } from '@/lib/api/adminCallables'
 import { pushAuditLog } from '@/lib/admin/pushAuditLog'
+import { rowMsInLocalDateRange } from '@/lib/admin/localDateRange'
 import { COLLECTIONS } from '@/lib/constants'
+import { downloadExcelCsv } from '@/lib/export/reportExport'
 import { db } from '@/lib/firebase'
 import type { WithdrawStatus } from '@/types/models'
 import { cn } from '@/lib/utils/cn'
@@ -32,7 +35,9 @@ type Row = {
 
 type ProfileLite = {
   username: string
+  fullName: string
   email: string
+  phone: string
 }
 
 const CHUNK = 30
@@ -49,7 +54,9 @@ async function fetchUserProfiles(ids: string[]): Promise<Map<string, ProfileLite
         const x = d.data() as Record<string, unknown>
         map.set(d.id, {
           username: String(x.username ?? ''),
+          fullName: String(x.fullName ?? '').trim(),
           email: String(x.email ?? ''),
+          phone: String(x.phone ?? ''),
         })
       })
     } catch {
@@ -99,6 +106,8 @@ export function AdminWithdrawalsPage() {
   const [filter, setFilter] = useState<'all' | WithdrawStatus>('all')
   const [txHash, setTxHash] = useState('')
   const [search, setSearch] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   const refreshProfiles = useCallback(async (uids: string[]) => {
     if (uids.length === 0) return
@@ -139,17 +148,67 @@ export function AdminWithdrawalsPage() {
   const filtered = useMemo(() => {
     const byStatus = filter === 'all' ? rows : rows.filter((r) => r.status === filter)
     const qq = search.trim().toLowerCase()
-    if (!qq) return byStatus
-    return byStatus.filter((r) => {
-      const p = profiles.get(r.userId)
-      const username = (p?.username ?? '').toLowerCase()
-      const email = (p?.email ?? '').toLowerCase()
-      if (username.includes(qq) || email.includes(qq)) return true
-      if (r.userId.toLowerCase().includes(qq)) return true
-      if (r.id.toLowerCase().includes(qq)) return true
-      return false
+    let list = byStatus
+    if (qq) {
+      list = byStatus.filter((r) => {
+        const p = profiles.get(r.userId)
+        const username = (p?.username ?? '').toLowerCase()
+        const fullName = (p?.fullName ?? '').toLowerCase()
+        const email = (p?.email ?? '').toLowerCase()
+        const phone = (p?.phone ?? '').toLowerCase()
+        if (username.includes(qq) || fullName.includes(qq) || email.includes(qq) || phone.includes(qq)) return true
+        if (r.userId.toLowerCase().includes(qq)) return true
+        if (r.id.toLowerCase().includes(qq)) return true
+        return false
+      })
+    }
+    return list.filter((r) => rowMsInLocalDateRange(r.ms, dateFrom, dateTo))
+  }, [filter, rows, search, profiles, dateFrom, dateTo])
+
+  const onExportExcel = useCallback(async () => {
+    if (filtered.length === 0) {
+      toast.error('Nothing to export')
+      return
+    }
+    const headers = [
+      'Withdrawal document ID',
+      'Submitted (ISO UTC)',
+      'Username',
+      'Full name',
+      'Email',
+      'Phone',
+      'User UID',
+      'Amount gross USDT',
+      'Fee USDT',
+      'Amount net USDT',
+      'Status',
+      'TXID',
+    ]
+    const dataRows = filtered.map((w) => {
+      const p = profiles.get(w.userId)
+      return [
+        w.id,
+        w.ms > 0 ? new Date(w.ms).toISOString() : '',
+        p?.username ?? '',
+        p?.fullName ?? '',
+        p?.email ?? '',
+        p?.phone ?? '',
+        w.userId,
+        w.amountGross.toFixed(2),
+        w.fee.toFixed(2),
+        w.amountNet.toFixed(2),
+        w.status,
+        w.txId ?? '',
+      ]
     })
-  }, [filter, rows, search, profiles])
+    try {
+      downloadExcelCsv('withdrawals-admin', headers, dataRows)
+      await pushAuditLog('adminExportWithdrawals', { rows: filtered.length })
+      toast.success(`Exported ${filtered.length} rows — open the CSV in Excel`)
+    } catch {
+      toast.error('Export failed')
+    }
+  }, [filtered, profiles])
 
   const exec = async (id: string, next: 'processing' | 'approved' | 'rejected' | 'paid') => {
     try {
@@ -185,7 +244,7 @@ export function AdminWithdrawalsPage() {
 
   const filterKeys = ['all', 'pending', 'processing', 'approved', 'rejected', 'paid'] as const
 
-  const colSpan = 9
+  const colSpan = 11
 
   const actionCell = (w: Row) => {
     const hasTx = Boolean(txHash.trim())
@@ -244,21 +303,32 @@ export function AdminWithdrawalsPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold text-[#e4e4e7] sm:text-2xl">Withdrawal Management</h1>
-        <p className="text-sm text-[#9898a8]">
-          Rejecting pending or processing requests refunds the member automatically. Use <strong>Processing</strong> when
-          payout work has started. Mark <strong>Paid</strong> with a blockchain TX hash.
-        </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-bold text-[#e4e4e7] sm:text-2xl">Withdrawal Management</h1>
+          <p className="text-sm text-[#9898a8]">
+            Rejecting pending or processing requests refunds the member automatically. Use <strong>Processing</strong> when
+            payout work has started. Mark <strong>Paid</strong> with a blockchain TX hash.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          className="shrink-0 self-start border-[rgba(212,175,55,0.4)] text-[#f5e6a8] hover:bg-[rgba(212,175,55,0.12)]"
+          disabled={filtered.length === 0}
+          onClick={() => void onExportExcel()}
+        >
+          Export to Excel (CSV)
+        </Button>
       </div>
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="admin-panel-sheet min-w-[min(100%,280px)] flex-1 space-y-2 p-3 sm:max-w-md">
-          <Label>Search by email or username</Label>
+          <Label>Search by name, username, email, or phone</Label>
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="e.g. user@mail.com or 4448551"
+            placeholder="e.g. Jane Doe, dfhgrug, or user@mail.com"
             autoComplete="off"
           />
           <p className="text-[10px] text-[#6b6b7c]">Also matches user UID or withdrawal document id.</p>
@@ -281,19 +351,50 @@ export function AdminWithdrawalsPage() {
         </div>
       </div>
 
+      <div className="admin-panel-sheet space-y-3 p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[#6b6b7c]">Submitted date range (local)</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:max-w-2xl">
+          <div className="space-y-1.5">
+            <Label>From</Label>
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>To</Label>
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            className="px-3 py-1.5 text-xs text-zinc-300 hover:bg-white/5"
+            onClick={() => {
+              setDateFrom('')
+              setDateTo('')
+            }}
+          >
+            Clear dates
+          </Button>
+          <span className="text-[11px] text-[#6b6b7c]">
+            Showing {filtered.length} of {rows.length} loaded (after status, search, and date filters).
+          </span>
+        </div>
+      </div>
+
       <div className="admin-panel-sheet space-y-2 p-4">
-        <Label>Blockchain TX hash (required for Mark paid)</Label>
         <Input value={txHash} onChange={(e) => setTxHash(e.target.value)} placeholder="0x… / explorer hash" />
       </div>
 
       <div className="admin-panel-sheet overflow-hidden p-0">
         <div className="max-w-[100vw] overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left text-[12px] text-[#c4c4ce]">
+          <table className="w-full min-w-[1040px] text-left text-[12px] text-[#c4c4ce]">
             <thead className="border-b border-[rgba(212,175,55,0.15)] bg-[rgba(212,175,55,0.04)]">
               <tr className="text-[10px] font-bold uppercase tracking-wider text-[#6b6b7c]">
                 <th className="px-3 py-2.5 pl-4">Submitted</th>
                 <th className="px-3 py-2.5">Username</th>
+                <th className="px-3 py-2.5">Full name</th>
                 <th className="px-3 py-2.5">Email</th>
+                <th className="px-3 py-2.5">Mobile</th>
                 <th className="px-3 py-2.5">User UID</th>
                 <th className="px-3 py-2.5 text-right">Gross</th>
                 <th className="px-3 py-2.5 text-right">Net</th>
@@ -314,22 +415,34 @@ export function AdminWithdrawalsPage() {
               ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={colSpan} className="px-4 py-8 text-center text-[#9898a8]">
-                    No withdrawals in scope.
+                    No withdrawals match status, search, or date range.
                   </td>
                 </tr>
               ) : (
-                filtered.map((w) => (
+                filtered.map((w) => {
+                  const p = profiles.get(w.userId)
+                  return (
                   <tr
                     key={w.id}
                     className="group border-b border-[rgba(212,175,55,0.08)] hover:bg-[rgba(212,175,55,0.03)]"
                   >
                     <td className="whitespace-nowrap px-3 py-2.5 pl-4 text-[11px] text-[#9898a8]">{fmt(w.ms)}</td>
-                    <td className="max-w-[100px] truncate px-3 py-2.5 font-mono text-[11px] text-[#e4e4e7]">
-                      {profiles.get(w.userId)?.username || '—'}
+                    <td
+                      className="max-w-[120px] truncate px-3 py-2.5 font-mono text-[11px] text-[#e4e4e7]"
+                      title={p?.username || undefined}
+                    >
+                      {p?.username || '—'}
+                    </td>
+                    <td
+                      className="max-w-[140px] truncate px-3 py-2.5 text-[11px] text-[#e4e4e7]"
+                      title={p?.fullName || undefined}
+                    >
+                      {p?.fullName || '—'}
                     </td>
                     <td className="max-w-[160px] break-all px-3 py-2.5 text-[11px]">
-                      {profiles.get(w.userId)?.email || '—'}
+                      {p?.email || '—'}
                     </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-[11px]">{p?.phone || '—'}</td>
                     <td className="max-w-[120px] truncate px-3 py-2.5 font-mono text-[10px] text-[#9898a8]" title={w.userId}>
                       {w.userId}
                     </td>
@@ -354,7 +467,8 @@ export function AdminWithdrawalsPage() {
                       {actionCell(w)}
                     </td>
                   </tr>
-                ))
+                  )
+                })
               )}
             </tbody>
           </table>

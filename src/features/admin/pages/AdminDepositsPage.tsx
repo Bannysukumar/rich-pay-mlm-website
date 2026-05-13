@@ -1,10 +1,14 @@
 import { collection, documentId, getDocs, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
+import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Input, Label } from '@/components/ui/Input'
+import { pushAuditLog } from '@/lib/admin/pushAuditLog'
+import { rowMsInLocalDateRange } from '@/lib/admin/localDateRange'
 import { adminFinalizeDepositCallable } from '@/lib/api/adminCallables'
 import { COLLECTIONS } from '@/lib/constants'
+import { downloadExcelCsv } from '@/lib/export/reportExport'
 import { db } from '@/lib/firebase'
 import type { DepositStatus } from '@/types/models'
 import { cn } from '@/lib/utils/cn'
@@ -21,6 +25,7 @@ type Row = {
 
 type ProfileLite = {
   username: string
+  fullName: string
   email: string
   phone: string
 }
@@ -62,6 +67,7 @@ async function fetchUserProfiles(ids: string[]): Promise<Map<string, ProfileLite
         const x = d.data() as Record<string, unknown>
         map.set(d.id, {
           username: String(x.username ?? ''),
+          fullName: String(x.fullName ?? '').trim(),
           email: String(x.email ?? ''),
           phone: String(x.phone ?? ''),
         })
@@ -142,6 +148,8 @@ export function AdminDepositsPage() {
   const [filter, setFilter] = useState<'all' | DepositStatus>('all')
   const [note, setNote] = useState('')
   const [search, setSearch] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   const refreshProfiles = useCallback(async (uids: string[]) => {
     if (uids.length === 0) return
@@ -181,17 +189,66 @@ export function AdminDepositsPage() {
   const filtered = useMemo(() => {
     const byStatus = filter === 'all' ? rows : rows.filter((r) => r.status === filter)
     const qq = search.trim().toLowerCase()
-    if (!qq) return byStatus
-    return byStatus.filter((r) => {
+    let list = byStatus
+    if (qq) {
+      list = byStatus.filter((r) => {
+        const p = profiles.get(r.userId)
+        const username = (p?.username ?? '').toLowerCase()
+        const fullName = (p?.fullName ?? '').toLowerCase()
+        const email = (p?.email ?? '').toLowerCase()
+        if (username.includes(qq) || fullName.includes(qq) || email.includes(qq)) return true
+        if (r.userId.toLowerCase().includes(qq)) return true
+        if (paymentIdFromDocId(r.id).toLowerCase().includes(qq)) return true
+        return false
+      })
+    }
+    return list.filter((r) => rowMsInLocalDateRange(r.ms, dateFrom, dateTo))
+  }, [filter, rows, search, profiles, dateFrom, dateTo])
+
+  const onExportExcel = useCallback(async () => {
+    if (filtered.length === 0) {
+      toast.error('Nothing to export')
+      return
+    }
+    const headers = [
+      'Deposit document ID',
+      'Created (ISO UTC)',
+      'Payment ID',
+      'Username',
+      'Full name',
+      'User UID',
+      'Email',
+      'Phone',
+      'Amount USDT',
+      'Status',
+      'Wallet credit applied',
+      'Proof URL',
+    ]
+    const dataRows = filtered.map((r) => {
       const p = profiles.get(r.userId)
-      const username = (p?.username ?? '').toLowerCase()
-      const email = (p?.email ?? '').toLowerCase()
-      if (username.includes(qq) || email.includes(qq)) return true
-      if (r.userId.toLowerCase().includes(qq)) return true
-      if (paymentIdFromDocId(r.id).toLowerCase().includes(qq)) return true
-      return false
+      return [
+        r.id,
+        r.ms > 0 ? new Date(r.ms).toISOString() : '',
+        paymentIdFromDocId(r.id),
+        p?.username ?? '',
+        p?.fullName ?? '',
+        r.userId,
+        p?.email ?? '',
+        p?.phone ?? '',
+        r.amount.toFixed(2),
+        r.status,
+        r.walletCreditApplied ? 'yes' : 'no',
+        r.proofUrl ?? '',
+      ]
     })
-  }, [filter, rows, search, profiles])
+    try {
+      downloadExcelCsv('deposits-admin', headers, dataRows)
+      await pushAuditLog('adminExportDeposits', { rows: filtered.length })
+      toast.success(`Exported ${filtered.length} rows — open the CSV in Excel`)
+    } catch {
+      toast.error('Export failed')
+    }
+  }, [filtered, profiles])
 
   const setStatus = async (id: string, decision: 'approved' | 'rejected') => {
     try {
@@ -222,12 +279,12 @@ export function AdminDepositsPage() {
         })
       : '—'
 
-  const colSpan = 10
+  const colSpan = 11
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-bold text-[#e4e4e7] sm:text-2xl">Deposit Management</h1>
           <p className="text-sm text-[#9898a8]">
             Approve / reject runs the <code className="text-[#f5e6a8]">adminFinalizeDeposit</code> callable so the
@@ -237,13 +294,23 @@ export function AdminDepositsPage() {
             hosting rewrite.
           </p>
         </div>
-        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-          <div className="admin-panel-sheet min-w-[min(100%,280px)] flex-1 space-y-2 p-3 sm:max-w-md">
-            <Label>Search by email or username</Label>
+        <Button
+          type="button"
+          variant="outline"
+          className="shrink-0 border-[rgba(212,175,55,0.4)] text-[#f5e6a8] hover:bg-[rgba(212,175,55,0.12)]"
+          disabled={filtered.length === 0}
+          onClick={() => void onExportExcel()}
+        >
+          Export to Excel (CSV)
+        </Button>
+      </div>
+      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <div className="admin-panel-sheet min-w-[min(100%,280px)] flex-1 space-y-2 p-3 sm:max-w-md">
+            <Label>Search by name, username, or email</Label>
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="e.g. user@mail.com or 4448551"
+              placeholder="e.g. Jane Doe, dfhgrug, or user@mail.com"
               autoComplete="off"
             />
             <p className="text-[10px] text-[#6b6b7c]">Also matches user UID or payment ID substring.</p>
@@ -263,7 +330,36 @@ export function AdminDepositsPage() {
                 {key === 'all' ? 'All' : key}
               </button>
             ))}
+        </div>
+      </div>
+
+      <div className="admin-panel-sheet space-y-3 p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[#6b6b7c]">Created date range (local)</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:max-w-2xl">
+          <div className="space-y-1.5">
+            <Label>From</Label>
+            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
           </div>
+          <div className="space-y-1.5">
+            <Label>To</Label>
+            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            className="px-3 py-1.5 text-xs text-zinc-300 hover:bg-white/5"
+            onClick={() => {
+              setDateFrom('')
+              setDateTo('')
+            }}
+          >
+            Clear dates
+          </Button>
+          <span className="text-[11px] text-[#6b6b7c]">
+            Showing {filtered.length} of {rows.length} loaded (after status, search, and date filters).
+          </span>
         </div>
       </div>
 
@@ -274,12 +370,13 @@ export function AdminDepositsPage() {
 
       <div className="admin-panel-sheet overflow-hidden p-0">
         <div className="max-w-[100vw] overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left text-[12px] text-[#c4c4ce]">
+          <table className="w-full min-w-[1080px] text-left text-[12px] text-[#c4c4ce]">
             <thead className="border-b border-[rgba(212,175,55,0.15)] bg-[rgba(212,175,55,0.04)]">
               <tr className="text-[10px] font-bold uppercase tracking-wider text-[#6b6b7c]">
                 <th className="px-3 py-2.5 pl-4">Created</th>
                 <th className="px-3 py-2.5">Payment ID</th>
                 <th className="px-3 py-2.5">Username</th>
+                <th className="px-3 py-2.5">Full name</th>
                 <th className="px-3 py-2.5">User UID</th>
                 <th className="px-3 py-2.5">Email</th>
                 <th className="px-3 py-2.5">Mobile</th>
@@ -301,7 +398,7 @@ export function AdminDepositsPage() {
               ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={colSpan} className="px-4 py-8 text-center text-[#9898a8]">
-                    No rows in filter.
+                    No rows match status, search, or date range.
                   </td>
                 </tr>
               ) : (
@@ -314,8 +411,17 @@ export function AdminDepositsPage() {
                       <td className="whitespace-nowrap px-3 py-2.5 font-mono text-[11px] text-[#f5e6a8]">
                         {paymentIdFromDocId(r.id)}
                       </td>
-                      <td className="max-w-[100px] truncate px-3 py-2.5 font-mono text-[11px] text-[#e4e4e7]">
+                      <td
+                        className="max-w-[120px] truncate px-3 py-2.5 font-mono text-[11px] text-[#e4e4e7]"
+                        title={p?.username || undefined}
+                      >
                         {p?.username || '—'}
+                      </td>
+                      <td
+                        className="max-w-[140px] truncate px-3 py-2.5 text-[11px] text-[#e4e4e7]"
+                        title={p?.fullName || undefined}
+                      >
+                        {p?.fullName || '—'}
                       </td>
                       <td className="max-w-[120px] truncate px-3 py-2.5 font-mono text-[10px] text-[#9898a8]" title={r.userId}>
                         {r.userId || '—'}

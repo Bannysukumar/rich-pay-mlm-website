@@ -6,9 +6,7 @@ import {
   orderBy,
   query,
   updateDoc,
-  where,
 } from 'firebase/firestore'
-import type { FormEvent } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Eye, EyeSlash } from '@phosphor-icons/react'
@@ -16,7 +14,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input, Label } from '@/components/ui/Input'
 import { pushAuditLog } from '@/lib/admin/pushAuditLog'
-import { adminAdjustMemberBalancesCallable, type AdminAdjustMemberBalanceField } from '@/lib/api/adminCallables'
+import { adminDeleteMemberCallable } from '@/lib/api/adminCallables'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 import type { UserRole } from '@/types/models'
@@ -42,28 +40,6 @@ type Row = {
   createdAt: number
   /** Plaintext login password — only present if historically stored on the user doc (not default). */
   storedLoginPassword: string | null
-}
-
-type MemberPackageRow = {
-  id: string
-  status: string
-  amount: number
-  planType: string
-  packageName: string
-  adminRoiPaused: boolean
-}
-
-function mapMemberPackage(docSnap: { id: string; data: () => Record<string, unknown> }): MemberPackageRow {
-  const d = docSnap.data()
-  const ps = d.planSnapshot as Record<string, unknown> | undefined
-  return {
-    id: docSnap.id,
-    status: String(d.status ?? ''),
-    amount: Number(d.amount ?? 0),
-    planType: String(d.planType ?? ps?.planType ?? '—'),
-    packageName: String(ps?.packageName ?? d.packageId ?? '—'),
-    adminRoiPaused: d.adminRoiPaused === true,
-  }
 }
 
 function readStoredPassword(d: Record<string, unknown>): string | null {
@@ -140,7 +116,6 @@ export function AdminUsersPage() {
   const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')
   const [sel, setSel] = useState<Row | null>(null)
-  const [memberPackages, setMemberPackages] = useState<MemberPackageRow[]>([])
 
   useEffect(() => {
     const r = query(collection(db, COLLECTIONS.users), orderBy('createdAt', 'desc'), limit(250))
@@ -188,46 +163,6 @@ export function AdminUsersPage() {
     )
   }, [])
 
-  useEffect(() => {
-    if (!sel) {
-      setMemberPackages([])
-      return
-    }
-    const qRef = query(
-      collection(db, COLLECTIONS.activePackages),
-      where('userId', '==', sel.id),
-      orderBy('startedAt', 'desc'),
-    )
-    return onSnapshot(
-      qRef,
-      (snap) => {
-        const list: MemberPackageRow[] = []
-        snap.forEach((ds) => list.push(mapMemberPackage(ds)))
-        setMemberPackages(list)
-      },
-      () => {
-        toast.error('Could not load member packages')
-      },
-    )
-  }, [sel?.id])
-
-  const setPackageRoiPaused = async (packageId: string, paused: boolean, userId: string) => {
-    try {
-      await updateDoc(doc(db, COLLECTIONS.activePackages, packageId), {
-        adminRoiPaused: paused,
-        updatedAt: Date.now(),
-      })
-      await pushAuditLog('adminActivePackageRoiPause', {
-        activePackageId: packageId,
-        userId,
-        adminRoiPaused: paused,
-      })
-      toast.success(paused ? 'Daily ROI paused for this plan' : 'Daily ROI resumed for this plan')
-    } catch {
-      toast.error('Could not update plan — check permissions')
-    }
-  }
-
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase()
     if (!qq) return rows
@@ -247,39 +182,41 @@ export function AdminUsersPage() {
       await updateDoc(doc(db, COLLECTIONS.users, sel.id), { ...patch, updatedAt: Date.now() })
       await pushAuditLog('adminUserPatch', { userId: sel.id, patch })
       toast.success('User updated')
+      if (typeof patch.blocked === 'boolean') {
+        setSel((prev) => (prev && prev.id === sel.id ? { ...prev, blocked: patch.blocked as boolean } : prev))
+      }
     } catch {
       toast.error('Update failed — check validation / permissions')
     }
   }
 
-  const walletDelta = async (e: FormEvent) => {
-    e.preventDefault()
+  const setUserBlocked = async (blocked: boolean) => {
     if (!sel) return
-    const fd = new FormData(e.currentTarget as HTMLFormElement)
-    const field = String(fd.get('wallet') || '') as AdminAdjustMemberBalanceField
-    const raw = Number(fd.get('delta') || 0)
-    const allowed: AdminAdjustMemberBalanceField[] = [
-      'wallet_deposit',
-      'wallet_activation',
-      'wallet_cash',
-      'nonWorkingIncomeBalance',
-      'workingIncomeBalance',
-      'userTotals_totalWorkingIncome',
-      'sponsorBonusTotal',
-      'dailyProfitsTotal',
-      'teamLevelCommissionTotal',
-      'rankCommissionTotal',
-    ]
-    if (!allowed.includes(field) || raw === 0) {
-      toast.error('Pick a balance field and a non-zero delta')
-      return
-    }
     try {
-      await adminAdjustMemberBalancesCallable({ userId: sel.id, field, delta: raw })
-      await pushAuditLog('adminWalletAdjust', { userId: sel.id, field, delta: raw })
-      toast.success('Balance adjusted')
+      await updateDoc(doc(db, COLLECTIONS.users, sel.id), { blocked, updatedAt: Date.now() })
+      await pushAuditLog('adminUserBlock', { userId: sel.id, blocked })
+      setSel((prev) => (prev && prev.id === sel.id ? { ...prev, blocked } : prev))
+      toast.success(blocked ? 'Account blocked' : 'Account unblocked')
     } catch {
-      toast.error('Could not adjust balance (check permissions, delta, and deploy functions)')
+      toast.error('Could not update block status')
+    }
+  }
+
+  const deleteMember = async () => {
+    if (!sel) return
+    const ok = window.confirm(
+      `Permanently delete member ${sel.username} (${sel.email})?\n\nThis removes their Firestore profile, username mapping, phone index entry, and Firebase Auth login. Related history (deposits, packages, etc.) is not deleted. This cannot be undone.`,
+    )
+    if (!ok) return
+    try {
+      await adminDeleteMemberCallable({ userId: sel.id })
+      await pushAuditLog('adminDeleteMember', { userId: sel.id, username: sel.username })
+      setSel(null)
+      toast.success('Member deleted')
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : ''
+      toast.error(msg || 'Delete failed — demote Admin role first, or deploy adminDeleteMember')
     }
   }
 
@@ -389,7 +326,7 @@ export function AdminUsersPage() {
 
       <Card className="h-fit space-y-4 border-[rgba(212,175,55,0.2)] bg-[#1a1d21] p-5">
         {!sel ? (
-          <p className="text-sm text-[#9898a8]">Select <span className="font-semibold text-[#f5e6a8]">Manage</span> on a row to edit profile, role, or wallets.</p>
+          <p className="text-sm text-[#9898a8]">Select <span className="font-semibold text-[#f5e6a8]">Manage</span> on a row to edit profile, role, and security. Ledger adjustments are under <span className="font-semibold text-[#f5e6a8]">Member balances</span> in the admin menu.</p>
         ) : (
           <>
             <div>
@@ -404,7 +341,29 @@ export function AdminUsersPage() {
               ) : null}
             </div>
 
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="text-xs"
+                disabled={sel.blocked}
+                onClick={() => void setUserBlocked(true)}
+              >
+                Block account
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="text-xs"
+                disabled={!sel.blocked}
+                onClick={() => void setUserBlocked(false)}
+              >
+                Unblock account
+              </Button>
+            </div>
+
             <form
+              key={sel.id}
               className="space-y-3"
               onSubmit={(e) => {
                 e.preventDefault()
@@ -446,60 +405,13 @@ export function AdminUsersPage() {
             </form>
 
             <div className="border-t border-zinc-900 pt-4">
-              <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[#d4af37]">
-                Investment plans (ROI)
+              <Button type="button" variant="danger" className="w-full text-xs" onClick={() => void deleteMember()}>
+                Delete member permanently
+              </Button>
+              <p className="mt-2 text-[9px] leading-snug text-[#6b6b7c]">
+                Cannot delete accounts with role Admin (change role first). Cannot delete your own account. Requires{' '}
+                <code className="text-[#a8a8b8]">adminDeleteMember</code> deployed.
               </p>
-              <p className="mb-3 text-[10px] leading-snug text-[#6b6b7c]">
-                For <span className="font-semibold text-[#9898a8]">active</span> plans only: pause stops daily ROI and
-                team-level share from that package until you turn it back on. Deploy latest{' '}
-                <code className="text-[#a8a8b8]">processDailyRoi</code> for production.
-              </p>
-              {memberPackages.length === 0 ? (
-                <p className="text-xs text-[#9898a8]">No packages for this member.</p>
-              ) : (
-                <ul className="max-h-56 space-y-2 overflow-y-auto pr-1">
-                  {memberPackages.map((p) => (
-                    <li
-                      key={p.id}
-                      className="rounded-md border border-[rgba(212,175,55,0.12)] bg-[rgba(0,0,0,0.2)] px-2.5 py-2 text-[11px]"
-                    >
-                      <div className="flex flex-wrap items-baseline justify-between gap-1">
-                        <span className="font-medium text-[#e4e4e7]">{p.packageName}</span>
-                        <span
-                          className={
-                            p.status === 'active'
-                              ? 'text-[#86efac]'
-                              : p.status === 'capped'
-                                ? 'text-[#fcd34d]'
-                                : 'text-[#9898a8]'
-                          }
-                        >
-                          {p.status}
-                        </span>
-                      </div>
-                      <div className="mt-0.5 text-[10px] text-[#9898a8]">
-                        ${p.amount.toFixed(2)} · {p.planType} ·{' '}
-                        <span className="font-mono text-[9px] text-[#6b6b7c]" title={p.id}>
-                          {p.id.length > 10 ? `${p.id.slice(0, 10)}…` : p.id}
-                        </span>
-                      </div>
-                      {p.status === 'active' ? (
-                        <label className="mt-2 flex cursor-pointer items-center gap-2 text-[10px] text-[#c4c4ce]">
-                          <input
-                            type="checkbox"
-                            className="accent-red-600"
-                            checked={p.adminRoiPaused}
-                            onChange={(e) => void setPackageRoiPaused(p.id, e.target.checked, sel.id)}
-                          />
-                          Pause daily ROI for this plan
-                        </label>
-                      ) : (
-                        <p className="mt-1.5 text-[10px] text-[#6b6b7c]">ROI accrual not running (not active).</p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
             </div>
 
             <div className="border-t border-zinc-900 pt-4 text-[11px] text-[#9898a8]">
@@ -517,32 +429,6 @@ export function AdminUsersPage() {
               <div>Team level total: ${sel.teamLevelCommissionTotal.toFixed(2)}</div>
               <div>Rank commission total: ${sel.rankCommissionTotal.toFixed(2)}</div>
             </div>
-
-            <form className="grid gap-2 border-t border-zinc-900 pt-4 text-xs" onSubmit={walletDelta}>
-              <Label>Balance adjustment (+/- USDT)</Label>
-              <select
-                name="wallet"
-                className="rounded-md border border-zinc-800 bg-[#09090b] px-2 py-1.5 text-zinc-200"
-              >
-                <option value="wallet_deposit">Deposit wallet</option>
-                <option value="wallet_activation">Activation wallet</option>
-                <option value="wallet_cash">Cash wallet</option>
-                <option value="nonWorkingIncomeBalance">Non-working income balance</option>
-                <option value="workingIncomeBalance">Working income balance</option>
-                <option value="userTotals_totalWorkingIncome">Total working income (3× cap counter)</option>
-                <option value="sponsorBonusTotal">Sponsor bonus (cumulative)</option>
-                <option value="dailyProfitsTotal">Daily profits (cumulative)</option>
-                <option value="teamLevelCommissionTotal">Team level bonus (cumulative)</option>
-                <option value="rankCommissionTotal">Rank bonus (cumulative)</option>
-              </select>
-              <Input name="delta" type="number" step="0.01" placeholder="e.g. 25 or -10" />
-              <Button type="submit" variant="outline">
-                Apply delta
-              </Button>
-              <p className="text-[10px] text-[#6b6b7c]">
-                Server-validated; cannot drive a balance negative. Deploy <code className="text-[#a8a8b8]">adminAdjustMemberBalances</code> for production. No automatic member notification.
-              </p>
-            </form>
           </>
         )}
       </Card>
