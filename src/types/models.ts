@@ -240,6 +240,11 @@ export interface SiteSettings {
    * and `walletConvert` rejects deposit→activation.
    */
   depositToActivationConvertEnabled?: boolean
+  /**
+   * When true, package top-up UserID must be the caller or a direct referral (sponsorUid === caller).
+   * When false or unset, any existing member UserID may receive the top-up. Default: unrestricted.
+   */
+  restrictPackageTopupToDirectReferrals?: boolean
   internalTransferFeePercent?: number
   minActivationTransfer?: number
   /** Optional marketing copy for public `/plans` (plain text). */

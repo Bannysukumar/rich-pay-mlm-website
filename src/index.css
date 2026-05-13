@@ -24,6 +24,11 @@
     @apply m-0 min-h-svh bg-rich-black font-sans text-zinc-200;
     font-family: var(--font-sans);
   }
+  /* react-hot-toast: stay above admin sticky header (z-1020+) and Bootstrap modals */
+  [data-rht-toaster] {
+    z-index: 2147483647 !important;
+    isolation: isolate;
+  }
   #root {
     @apply min-h-svh w-full max-w-none;
   }

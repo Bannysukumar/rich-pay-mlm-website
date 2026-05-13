@@ -2,6 +2,8 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore'
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import toast from 'react-hot-toast'
+import { StatusNotice } from '@/components/ui/StatusNotice'
+import { getCallableErrorMessage } from '@/lib/api/callableErrorMessage'
 import { createWithdrawalCallable } from '@/lib/api/financeCallables'
 import { useAuthState } from '@/hooks/useAuth'
 import { useSiteSettings } from '@/hooks/useSiteSettings'
@@ -22,6 +24,7 @@ export function WithdrawPage() {
   const [cpin, setCpin] = useState('')
   const [busy, setBusy] = useState(false)
   const [maxPrincipal, setMaxPrincipal] = useState(0)
+  const [banner, setBanner] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
 
   const cash = profile?.wallets.cash ?? 0
   const defaultAddress = profile?.usdtBep20Address?.trim() ?? ''
@@ -105,20 +108,37 @@ export function WithdrawPage() {
       toast.error('Enter transaction password')
       return
     }
+    setBanner(null)
     setBusy(true)
     try {
-      await createWithdrawalCallable({
-        amount,
-        address: defaultAddress,
-        transactionPassword: cpin.trim() || undefined,
+      await toast.promise(
+        createWithdrawalCallable({
+          amount,
+          address: defaultAddress,
+          transactionPassword: cpin.trim() || undefined,
+        }),
+        {
+          loading: 'Submitting withdrawal request…',
+          success: (data) =>
+            `Withdrawal queued: $${amount.toFixed(2)} gross (ref ${String(data.withdrawalId ?? '').slice(0, 10)}…).`,
+          error: (err) =>
+            getCallableErrorMessage(err) ||
+            'Withdrawal failed — check amount, window, caps, cash balance, and transaction password.',
+        },
+        { duration: 5500, success: { duration: 8000 }, error: { duration: 10000 } },
+      )
+      const net = amount - (amount * feePercent) / 100
+      setBanner({
+        kind: 'success',
+        text: `Request submitted. Approx. net after ${feePercent}% fee: $${net.toFixed(4)} USDT. Admin will process your payout.`,
       })
-      toast.success('Withdrawal queued for admin processing')
       setEpoints('')
       setCpin('')
     } catch (err: unknown) {
       const msg =
-        err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : ''
-      toast.error(msg || 'Withdrawal failed — deploy latest Cloud Functions')
+        getCallableErrorMessage(err) ||
+        'Withdrawal failed — deploy latest Cloud Functions or adjust amount / timing.'
+      setBanner({ kind: 'error', text: msg })
     } finally {
       setBusy(false)
     }
@@ -162,6 +182,13 @@ export function WithdrawPage() {
                   <div className="mt-1">{fmtNextAutoSummary(settings)}</div>
                 </div>
                 <div className="basic-form">
+                  {banner ? (
+                    <StatusNotice
+                      variant={banner.kind}
+                      message={banner.text}
+                      onDismiss={() => setBanner(null)}
+                    />
+                  ) : null}
                   <form name="form1" method="post" onSubmit={(ev) => void submit(ev)}>
                     <div className="mb-3 col-md-12">
                       <label className="form-label" htmlFor="epoints">

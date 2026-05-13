@@ -1038,6 +1038,9 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
     }
     const beneRaw = String(beneficiaryUsername ?? '').trim().toLowerCase();
     let beneficiaryUid = uid;
+    const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get();
+    const settings = settingsSnap.data() ?? {};
+    const restrictTopupToDirects = settings.restrictPackageTopupToDirectReferrals === true;
     if (beneRaw && beneRaw !== callerUsername) {
         const mapSnap = await db.collection(COL_USERS_BY_UN).doc(beneRaw).get();
         if (!mapSnap.exists)
@@ -1046,9 +1049,11 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
         const beneSnap = await db.collection(COL_USERS).doc(beneficiaryUid).get();
         if (!beneSnap.exists)
             throw new https_1.HttpsError('not-found', 'Member not found');
-        const sponsorOfBene = beneSnap.data()?.sponsorUid;
-        if (sponsorOfBene !== uid) {
-            throw new https_1.HttpsError('permission-denied', 'You can only topup your direct referrals or yourself');
+        if (restrictTopupToDirects) {
+            const sponsorOfBene = beneSnap.data()?.sponsorUid;
+            if (sponsorOfBene !== uid) {
+                throw new https_1.HttpsError('permission-denied', 'You can only topup your direct referrals or yourself');
+            }
         }
     }
     const pkgSnap = await db.collection(COL_PACKAGES).doc(packageId).get();
@@ -1069,8 +1074,6 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
     if (activationBalPre < splitDebit.activation || depositBal < splitDebit.deposit) {
         throw new https_1.HttpsError('failed-precondition', `Package purchase splits 50/50: need $${splitDebit.activation.toFixed(2)} in Activation Wallet and $${splitDebit.deposit.toFixed(2)} in Deposit Wallet (total $${amount.toFixed(2)})`);
     }
-    const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get();
-    const settings = settingsSnap.data() ?? {};
     const teamDepth = Math.min(100, Math.max(1, Number(settings.teamLevelsCount ?? 30)));
     const sponsorPctFrozen = Number(settings.sponsorPercent ?? 5);
     const siteNwMult = Number(settings.nonWorkingIncomeCapMultiplier ?? 2);

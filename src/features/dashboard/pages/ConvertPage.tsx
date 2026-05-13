@@ -1,6 +1,8 @@
 import { useCallback, useState } from 'react'
 import type { FormEvent } from 'react'
 import toast from 'react-hot-toast'
+import { StatusNotice } from '@/components/ui/StatusNotice'
+import { getCallableErrorMessage } from '@/lib/api/callableErrorMessage'
 import {
   convertIncomeToActivationCallable,
   resolveUsernameCallable,
@@ -20,6 +22,8 @@ export function ConvertPage() {
   const [amountStr, setAmountStr] = useState('')
   const [cpin, setCpin] = useState('')
   const [busy, setBusy] = useState(false)
+  const [bannerDeposit, setBannerDeposit] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
+  const [bannerIncome, setBannerIncome] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
 
   const income = profile?.wallets.cash ?? 0
   const deposit = profile?.wallets.deposit ?? 0
@@ -51,15 +55,30 @@ export function ConvertPage() {
       toast.error('Amount exceeds Deposit Wallet balance')
       return
     }
+    setBannerDeposit(null)
     setDepositBusy(true)
     try {
-      await walletConvertCallable({ from: 'deposit', to: 'activation', amount })
-      toast.success('Moved from Deposit Wallet to Activation Wallet')
+      await toast.promise(
+        walletConvertCallable({ from: 'deposit', to: 'activation', amount }),
+        {
+          loading: 'Moving USDT to Activation wallet…',
+          success: `Success: $${amount.toFixed(2)} moved from Deposit → Activation.`,
+          error: (err) =>
+            getCallableErrorMessage(err) ||
+            'Could not move funds — check balance, admin settings, or try again.',
+        },
+        { duration: 5500, success: { duration: 6500 }, error: { duration: 9000 } },
+      )
+      setBannerDeposit({
+        kind: 'success',
+        text: `$${amount.toFixed(2)} was debited from your Deposit wallet and credited to Activation.`,
+      })
       setDepositToActAmount('')
     } catch (err: unknown) {
       const msg =
-        err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : ''
-      toast.error(msg || 'Conversion failed')
+        getCallableErrorMessage(err) ||
+        'Could not move funds — check Deposit balance or whether this path is enabled.'
+      setBannerDeposit({ kind: 'error', text: msg })
     } finally {
       setDepositBusy(false)
     }
@@ -81,20 +100,36 @@ export function ConvertPage() {
       toast.error('Enter transaction password')
       return
     }
+    const toUser = transferto.trim()
+    setBannerIncome(null)
     setBusy(true)
     try {
-      await convertIncomeToActivationCallable({
-        beneficiaryUsername: transferto.trim(),
-        amount,
-        transactionPassword: cpin.trim() || undefined,
+      await toast.promise(
+        convertIncomeToActivationCallable({
+          beneficiaryUsername: toUser,
+          amount,
+          transactionPassword: cpin.trim() || undefined,
+        }),
+        {
+          loading: 'Converting income to activation wallet…',
+          success: `Success: $${amount.toFixed(4)} sent to ${toUser}'s Activation wallet.`,
+          error: (err) =>
+            getCallableErrorMessage(err) ||
+            'Conversion failed — check Cash balance, UserID (direct referral rules), and transaction password.',
+        },
+        { duration: 5500, success: { duration: 7000 }, error: { duration: 9000 } },
+      )
+      setBannerIncome({
+        kind: 'success',
+        text: `Income conversion completed: $${amount.toFixed(4)} USDT → Activation for UserID ${toUser}.`,
       })
-      toast.success('Converted to activation wallet')
       setAmountStr('')
       setCpin('')
     } catch (err: unknown) {
       const msg =
-        err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : ''
-      toast.error(msg || 'Conversion failed — check balance, UserID, and deploy latest functions')
+        getCallableErrorMessage(err) ||
+        'Conversion failed — check Cash wallet, recipient UserID, referral rules, and deploy latest functions.'
+      setBannerIncome({ kind: 'error', text: msg })
     } finally {
       setBusy(false)
     }
@@ -118,6 +153,13 @@ export function ConvertPage() {
                     <strong>Activation Wallet</strong> — move USDT here first, then use{' '}
                     <strong>Package → Topup</strong>.
                   </p>
+                  {bannerDeposit ? (
+                    <StatusNotice
+                      variant={bannerDeposit.kind}
+                      message={bannerDeposit.text}
+                      onDismiss={() => setBannerDeposit(null)}
+                    />
+                  ) : null}
                   <form className="basic-form" onSubmit={(ev) => void submitDepositToActivation(ev)}>
                     <div className="mb-3 col-md-12">
                       <label className="form-label" htmlFor="dep-to-act">
@@ -151,6 +193,13 @@ export function ConvertPage() {
               </div>
               <div className="card-body">
                 <div className="basic-form">
+                  {bannerIncome ? (
+                    <StatusNotice
+                      variant={bannerIncome.kind}
+                      message={bannerIncome.text}
+                      onDismiss={() => setBannerIncome(null)}
+                    />
+                  ) : null}
                   <form name="form1" method="post" onSubmit={(ev) => void submit(ev)}>
                     <div className="mb-3 col-md-12">
                       <label className="form-label" htmlFor="transferto">

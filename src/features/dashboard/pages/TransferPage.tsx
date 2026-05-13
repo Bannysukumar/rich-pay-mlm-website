@@ -1,6 +1,8 @@
 import { useCallback, useState } from 'react'
 import type { FormEvent } from 'react'
 import toast from 'react-hot-toast'
+import { StatusNotice } from '@/components/ui/StatusNotice'
+import { getCallableErrorMessage } from '@/lib/api/callableErrorMessage'
 import { internalTransferCallable, resolveUsernameCallable } from '@/lib/api/financeCallables'
 import { useAuthState } from '@/hooks/useAuth'
 import { useSiteSettings } from '@/hooks/useSiteSettings'
@@ -13,6 +15,7 @@ export function TransferPage() {
   const [epoints, setEpoints] = useState('')
   const [cpin, setCpin] = useState('')
   const [busy, setBusy] = useState(false)
+  const [banner, setBanner] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
 
   const activation = profile?.wallets.activation ?? 0
 
@@ -46,20 +49,36 @@ export function TransferPage() {
       toast.error('Enter transaction password')
       return
     }
+    const toUser = transferto.trim()
+    setBanner(null)
     setBusy(true)
     try {
-      await internalTransferCallable({
-        recipientUsername: transferto.trim(),
-        amount,
-        transactionPassword: cpin.trim() || undefined,
+      await toast.promise(
+        internalTransferCallable({
+          recipientUsername: toUser,
+          amount,
+          transactionPassword: cpin.trim() || undefined,
+        }),
+        {
+          loading: 'Sending activation transfer…',
+          success: `Success: $${amount.toFixed(4)} USDT sent to ${toUser}.`,
+          error: (err) =>
+            getCallableErrorMessage(err) ||
+            'Transfer failed — check Activation balance, recipient UserID, referral rules, and transaction password.',
+        },
+        { duration: 5500, success: { duration: 7000 }, error: { duration: 9000 } },
+      )
+      setBanner({
+        kind: 'success',
+        text: `Transfer completed: $${amount.toFixed(4)} USDT from your Activation wallet to UserID ${toUser}.`,
       })
-      toast.success('Transfer completed')
       setEpoints('')
       setCpin('')
     } catch (err: unknown) {
       const msg =
-        err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : ''
-      toast.error(msg || 'Transfer failed — check balance, UserID, and deploy latest functions')
+        getCallableErrorMessage(err) ||
+        'Transfer failed — check balance, UserID, and deploy latest Cloud Functions.'
+      setBanner({ kind: 'error', text: msg })
     } finally {
       setBusy(false)
     }
@@ -83,6 +102,13 @@ export function TransferPage() {
                   </p>
                 ) : null}
                 <div className="basic-form">
+                  {banner ? (
+                    <StatusNotice
+                      variant={banner.kind}
+                      message={banner.text}
+                      onDismiss={() => setBanner(null)}
+                    />
+                  ) : null}
                   <form name="form1" method="post" onSubmit={(ev) => void submit(ev)}>
                     <div className="mb-3 col-md-12">
                       <label className="form-label" htmlFor="transferto">

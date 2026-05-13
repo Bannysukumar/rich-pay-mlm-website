@@ -2,6 +2,8 @@ import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from 
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import toast from 'react-hot-toast'
+import { StatusNotice } from '@/components/ui/StatusNotice'
+import { getCallableErrorMessage } from '@/lib/api/callableErrorMessage'
 import { changeTransactionPasswordCallable } from '@/lib/api/profileCallables'
 import { useAuthState } from '@/hooks/useAuth'
 import { auth } from '@/lib/firebase'
@@ -18,6 +20,8 @@ export function ChangePasswordPage() {
   const [newTx, setNewTx] = useState('')
   const [confirmTx, setConfirmTx] = useState('')
   const [busyTx, setBusyTx] = useState(false)
+  const [bannerLogin, setBannerLogin] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
+  const [bannerTx, setBannerTx] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
 
   const submitLogin = async (e: FormEvent) => {
     e.preventDefault()
@@ -35,17 +39,33 @@ export function ChangePasswordPage() {
       toast.error('Confirmation does not match')
       return
     }
+    setBannerLogin(null)
     setBusyLogin(true)
     try {
-      const cred = EmailAuthProvider.credential(email, oldLogin)
-      await reauthenticateWithCredential(user, cred)
-      await updatePassword(user, newLogin)
-      toast.success('Password updated')
+      await toast.promise(
+        (async () => {
+          const cred = EmailAuthProvider.credential(email, oldLogin)
+          await reauthenticateWithCredential(user, cred)
+          await updatePassword(user, newLogin)
+        })(),
+        {
+          loading: 'Updating login password…',
+          success: 'Login password updated successfully.',
+          error: (err) =>
+            getCallableErrorMessage(err) ||
+            'Could not update login password — check your current password and try again.',
+        },
+        { duration: 5500, success: { duration: 7000 }, error: { duration: 10000 } },
+      )
+      setBannerLogin({ kind: 'success', text: 'Your account login password was changed. Use the new password next time you sign in.' })
       setOldLogin('')
       setNewLogin('')
       setConfirmLogin('')
-    } catch {
-      toast.error('Could not update — check current password')
+    } catch (err: unknown) {
+      const msg =
+        getCallableErrorMessage(err) ||
+        'Could not update login password — verify your current password and network connection.'
+      setBannerLogin({ kind: 'error', text: msg })
     } finally {
       setBusyLogin(false)
     }
@@ -65,20 +85,35 @@ export function ChangePasswordPage() {
       toast.error('Enter your current transaction password')
       return
     }
+    setBannerTx(null)
     setBusyTx(true)
     try {
-      await changeTransactionPasswordCallable({
-        currentPassword: oldTx.trim() || undefined,
-        newPassword: newTx,
+      await toast.promise(
+        changeTransactionPasswordCallable({
+          currentPassword: oldTx.trim() || undefined,
+          newPassword: newTx,
+        }),
+        {
+          loading: 'Updating transaction password…',
+          success: 'Transaction password updated successfully.',
+          error: (err) =>
+            getCallableErrorMessage(err) ||
+            'Could not update transaction password — check current PIN and deploy latest functions.',
+        },
+        { duration: 5500, success: { duration: 7000 }, error: { duration: 10000 } },
+      )
+      setBannerTx({
+        kind: 'success',
+        text: 'Your transaction password (PIN) for transfers and withdrawals was updated.',
       })
-      toast.success('Transaction password updated')
       setOldTx('')
       setNewTx('')
       setConfirmTx('')
     } catch (err: unknown) {
       const msg =
-        err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : ''
-      toast.error(msg || 'Could not update transaction password — deploy latest Cloud Functions')
+        getCallableErrorMessage(err) ||
+        'Could not update transaction password — deploy latest Cloud Functions or verify your current PIN.'
+      setBannerTx({ kind: 'error', text: msg })
     } finally {
       setBusyTx(false)
     }
@@ -95,6 +130,13 @@ export function ChangePasswordPage() {
               </div>
               <div className="card-body">
                 <div className="basic-form">
+                  {bannerLogin ? (
+                    <StatusNotice
+                      variant={bannerLogin.kind}
+                      message={bannerLogin.text}
+                      onDismiss={() => setBannerLogin(null)}
+                    />
+                  ) : null}
                   <form name="form1" method="post" onSubmit={(ev) => void submitLogin(ev)}>
                     <div className="mb-3 col-md-12">
                       <label className="form-label" htmlFor="login-oldpassword">
@@ -159,6 +201,13 @@ export function ChangePasswordPage() {
               </div>
               <div className="card-body">
                 <div className="basic-form">
+                  {bannerTx ? (
+                    <StatusNotice
+                      variant={bannerTx.kind}
+                      message={bannerTx.text}
+                      onDismiss={() => setBannerTx(null)}
+                    />
+                  ) : null}
                   <form name="form2" method="post" onSubmit={(ev) => void submitTx(ev)}>
                     <div className="mb-3 col-md-12">
                       <label className="form-label" htmlFor="tx-oldpassword">

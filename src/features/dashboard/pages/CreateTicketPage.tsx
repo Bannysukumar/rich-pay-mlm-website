@@ -3,6 +3,8 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import { StatusNotice } from '@/components/ui/StatusNotice'
+import { getCallableErrorMessage } from '@/lib/api/callableErrorMessage'
 import { useAuthState } from '@/hooks/useAuth'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
@@ -28,6 +30,7 @@ export function CreateTicketPage() {
   const [department, setDepartment] = useState<string>('ACCOUNTS')
   const [priority, setPriority] = useState<string>('NORMAL')
   const [busy, setBusy] = useState(false)
+  const [banner, setBanner] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -45,25 +48,39 @@ export function CreateTicketPage() {
       toast.error('Enter a message')
       return
     }
+    setBanner(null)
     setBusy(true)
     try {
-      await addDoc(collection(db, COLLECTIONS.tickets), {
-        userId: firebaseUid,
-        title: t,
-        message: m,
-        department,
-        priority,
-        status: 'open',
-        createdAt: serverTimestamp(),
-      })
-      toast.success('Ticket submitted')
+      await toast.promise(
+        addDoc(collection(db, COLLECTIONS.tickets), {
+          userId: firebaseUid,
+          title: t,
+          message: m,
+          department,
+          priority,
+          status: 'open',
+          createdAt: serverTimestamp(),
+        }),
+        {
+          loading: 'Submitting ticket…',
+          success: 'Ticket created — opening your ticket list.',
+          error: (err) =>
+            getCallableErrorMessage(err) ||
+            'Could not submit ticket — check your connection and Firestore rules.',
+        },
+        { duration: 5500, success: { duration: 6500 }, error: { duration: 9000 } },
+      )
+      setBanner({ kind: 'success', text: `Your ticket "${t}" was submitted (${department} · ${priority}).` })
       setTitle('')
       setMessage('')
       setDepartment('ACCOUNTS')
       setPriority('NORMAL')
-      navigate('/dashboard/tickets/list')
-    } catch {
-      toast.error('Could not submit ticket')
+      window.setTimeout(() => navigate('/dashboard/tickets/list'), 900)
+    } catch (err: unknown) {
+      const msg =
+        getCallableErrorMessage(err) ||
+        'Could not submit ticket — try again or contact support if this persists.'
+      setBanner({ kind: 'error', text: msg })
     } finally {
       setBusy(false)
     }
@@ -80,6 +97,13 @@ export function CreateTicketPage() {
               </div>
               <div className="card-body">
                 <div className="basic-form">
+                  {banner ? (
+                    <StatusNotice
+                      variant={banner.kind}
+                      message={banner.text}
+                      onDismiss={() => setBanner(null)}
+                    />
+                  ) : null}
                   <form name="form1" method="post" onSubmit={(ev) => void submit(ev)}>
                     <div className="mb-3 col-md-12">
                       <label className="form-label" htmlFor="title">

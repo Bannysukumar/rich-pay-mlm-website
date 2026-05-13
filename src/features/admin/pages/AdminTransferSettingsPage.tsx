@@ -12,6 +12,7 @@ export function AdminTransferSettingsPage() {
   const [income, setIncome] = useState(true)
   const [depositToActivation, setDepositToActivation] = useState(true)
   const [transferToAnyMember, setTransferToAnyMember] = useState(false)
+  const [restrictTopup, setRestrictTopup] = useState(false)
   const [fee, setFee] = useState('0')
   const [minAmt, setMinAmt] = useState('0')
   const [busy, setBusy] = useState(false)
@@ -22,6 +23,7 @@ export function AdminTransferSettingsPage() {
     setIncome(data.allowIncomeToActivation !== false)
     setDepositToActivation(data.depositToActivationConvertEnabled !== false)
     setTransferToAnyMember(data.allowActivationTransferToAnyUser === true)
+    setRestrictTopup(data.restrictPackageTopupToDirectReferrals === true)
     setFee(String(Number(data.internalTransferFeePercent ?? 0)))
     setMinAmt(String(Number(data.minActivationTransfer ?? 0)))
   }, [data, ready])
@@ -34,6 +36,7 @@ export function AdminTransferSettingsPage() {
         allowIncomeToActivation: income,
         depositToActivationConvertEnabled: depositToActivation,
         allowActivationTransferToAnyUser: transferToAnyMember,
+        restrictPackageTopupToDirectReferrals: restrictTopup,
         internalTransferFeePercent: Number(fee),
         minActivationTransfer: Number(minAmt),
       })
@@ -77,6 +80,19 @@ export function AdminTransferSettingsPage() {
             onChange={(e) => setTransferToAnyMember(e.target.checked)}
           />
           Activation transfers: allow any member UserID (off = direct referrals only; enforced in Cloud Functions)
+        </label>
+        <label className="flex items-start gap-3 text-xs text-zinc-300">
+          <input
+            type="checkbox"
+            className="accent-red-600 mt-0.5"
+            checked={restrictTopup}
+            onChange={(e) => setRestrictTopup(e.target.checked)}
+          />
+          <span>
+            Package top-up: only yourself or <strong className="text-zinc-200">direct referrals</strong> (UserID must
+            be your downline). <strong className="text-zinc-400">Unchecked</strong> = any member may receive a package
+            top-up from the payer (<code className="text-zinc-500">activatePackage</code>).
+          </span>
         </label>
         <div>
           <Label>Symbolic transfer surcharge (%)</Label>

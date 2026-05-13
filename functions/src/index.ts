@@ -1170,15 +1170,21 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
 
   const beneRaw = String(beneficiaryUsername ?? '').trim().toLowerCase()
   let beneficiaryUid = uid
+  const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get()
+  const settings = settingsSnap.data() ?? {}
+  const restrictTopupToDirects = settings.restrictPackageTopupToDirectReferrals === true
+
   if (beneRaw && beneRaw !== callerUsername) {
     const mapSnap = await db.collection(COL_USERS_BY_UN).doc(beneRaw).get()
     if (!mapSnap.exists) throw new HttpsError('not-found', 'Invalid UserID to Topup')
     beneficiaryUid = mapSnap.data()!.uid as string
     const beneSnap = await db.collection(COL_USERS).doc(beneficiaryUid).get()
     if (!beneSnap.exists) throw new HttpsError('not-found', 'Member not found')
-    const sponsorOfBene = beneSnap.data()?.sponsorUid as string | undefined
-    if (sponsorOfBene !== uid) {
-      throw new HttpsError('permission-denied', 'You can only topup your direct referrals or yourself')
+    if (restrictTopupToDirects) {
+      const sponsorOfBene = beneSnap.data()?.sponsorUid as string | undefined
+      if (sponsorOfBene !== uid) {
+        throw new HttpsError('permission-denied', 'You can only topup your direct referrals or yourself')
+      }
     }
   }
 
@@ -1203,8 +1209,6 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
     )
   }
 
-  const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get()
-  const settings = settingsSnap.data() ?? {}
   const teamDepth = Math.min(100, Math.max(1, Number(settings.teamLevelsCount ?? 30)))
   const sponsorPctFrozen = Number(settings.sponsorPercent ?? 5)
   const siteNwMult = Number(settings.nonWorkingIncomeCapMultiplier ?? 2)

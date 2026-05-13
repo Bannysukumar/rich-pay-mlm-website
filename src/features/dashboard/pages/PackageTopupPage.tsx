@@ -2,9 +2,12 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import toast from 'react-hot-toast'
+import { getCallableErrorMessage } from '@/lib/api/callableErrorMessage'
 import { activatePackageCallable, resolveUsernameCallable } from '@/lib/api/financeCallables'
-import { splitTopupWalletDebit } from '@/lib/finance/splitTopupWallet'
+import { StatusNotice } from '@/components/ui/StatusNotice'
 import { useAuthState } from '@/hooks/useAuth'
+import { useSiteSettings } from '@/hooks/useSiteSettings'
+import { splitTopupWalletDebit } from '@/lib/finance/splitTopupWallet'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 import type { PackageDef } from '@/types/models'
@@ -20,6 +23,8 @@ function sortPackages(list: PackageDef[]): PackageDef[] {
 
 export function PackageTopupPage() {
   const { profile } = useAuthState()
+  const { settings } = useSiteSettings()
+  const topupRestrictToDirectReferrals = settings.restrictPackageTopupToDirectReferrals === true
   const [packages, setPackages] = useState<PackageDef[]>([])
   const [selectedPackageId, setSelectedPackageId] = useState('')
   const [amountInput, setAmountInput] = useState('')
@@ -28,6 +33,7 @@ export function PackageTopupPage() {
   const [ptype, setPtype] = useState('-1')
   const [cpin, setCpin] = useState('')
   const [busy, setBusy] = useState(false)
+  const [submitBanner, setSubmitBanner] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
 
   const sortedPackages = useMemo(() => sortPackages(packages), [packages])
 
@@ -142,21 +148,45 @@ export function PackageTopupPage() {
       toast.error(`Amount must be between $${min} and $${max} for "${selectedPkg.name}"`)
       return
     }
+
+    const beneUser = idno.trim()
+    const selfUser = profile.username?.trim().toLowerCase() ?? ''
+    const isSelf = beneUser.toLowerCase() === selfUser
+    const planLabel = ptype === '2' ? 'Compounding' : 'Daily'
+
+    setSubmitBanner(null)
     setBusy(true)
     try {
-      await activatePackageCallable({
-        packageId: selectedPkg.id,
-        amount,
-        beneficiaryUsername: idno.trim(),
-        transactionPassword: cpin.trim() || undefined,
-        planType: Number(ptype),
-      })
-      toast.success('Package purchased')
+      const res = await toast.promise(
+        activatePackageCallable({
+          packageId: selectedPkg.id,
+          amount,
+          beneficiaryUsername: beneUser,
+          transactionPassword: cpin.trim() || undefined,
+          planType: Number(ptype),
+        }),
+        {
+          loading: 'Activating package…',
+          success: () =>
+            isSelf
+              ? `Success: package activated — $${amount.toFixed(2)} · ${selectedPkg.name} (${planLabel}).`
+              : `Success: package activated for ${beneUser} — $${amount.toFixed(2)} · ${selectedPkg.name} (${planLabel}).`,
+          error: (err) =>
+            getCallableErrorMessage(err) ||
+            'Activation failed — check Activation + Deposit (50/50), plan type, and transaction password.',
+        },
+        { duration: 5500, success: { duration: 6500 }, error: { duration: 9000 } },
+      )
+      const okText = isSelf
+        ? `Your package is active: $${amount.toFixed(2)} (${selectedPkg.name}, ${planLabel}). Reference: ${res.activePackageId ?? '—'}.`
+        : `Package activated for ${beneUser}: $${amount.toFixed(2)} (${selectedPkg.name}, ${planLabel}).`
+      setSubmitBanner({ kind: 'success', text: okText })
       setCpin('')
     } catch (err: unknown) {
       const msg =
-        err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : ''
-      toast.error(msg || 'Topup failed — need 50% in Activation and 50% in Deposit wallet (deploy latest functions)')
+        getCallableErrorMessage(err) ||
+        'Activation failed — check wallets (50% Activation + 50% Deposit), plan selection, and deploy latest functions.'
+      setSubmitBanner({ kind: 'error', text: msg })
     } finally {
       setBusy(false)
     }
@@ -182,6 +212,13 @@ export function PackageTopupPage() {
               </div>
               <div className="card-body">
                 <div className="basic-form">
+                  {submitBanner ? (
+                    <StatusNotice
+                      variant={submitBanner.kind}
+                      message={submitBanner.text}
+                      onDismiss={() => setSubmitBanner(null)}
+                    />
+                  ) : null}
                   <form name="form1" method="post" onSubmit={(ev) => void submit(ev)}>
                     <div className="mb-3">
                       <div className="form-label">UserID to Topup</div>
@@ -197,6 +234,20 @@ export function PackageTopupPage() {
                         disabled={busy}
                         autoComplete="off"
                       />
+                      <p className="mt-2 mb-0 small text-secondary">
+                        {topupRestrictToDirectReferrals ? (
+                          <>
+                            <strong className="text-warning">Referral rule on:</strong> UserID must be{' '}
+                            <strong>you</strong> or someone who joined with <strong>you</strong> as sponsor (direct
+                            referral).
+                          </>
+                        ) : (
+                          <>
+                            <strong className="text-info">Open top-up:</strong> you may enter any valid member UserID
+                            to receive this package (admin can turn referral-only mode on under Transfer settings).
+                          </>
+                        )}
+                      </p>
                     </div>
                     <div className="mb-3">
                       <div className="form-label">Name of the Member</div>

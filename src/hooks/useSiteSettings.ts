@@ -40,6 +40,7 @@ const defaults: SiteSettings = {
   allowActivationTransferToAnyUser: false,
   allowIncomeToActivation: true,
   depositToActivationConvertEnabled: true,
+  restrictPackageTopupToDirectReferrals: false,
   internalTransferFeePercent: 0,
   minActivationTransfer: 0,
   tickerSymbols: ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT'],
@@ -153,6 +154,8 @@ export function useSiteSettings() {
             d.depositToActivationConvertEnabled !== undefined
               ? Boolean(d.depositToActivationConvertEnabled)
               : defaults.depositToActivationConvertEnabled,
+          restrictPackageTopupToDirectReferrals:
+            d.restrictPackageTopupToDirectReferrals === true,
           internalTransferFeePercent: Number(
             d.internalTransferFeePercent ?? defaults.internalTransferFeePercent ?? 0,
           ),
