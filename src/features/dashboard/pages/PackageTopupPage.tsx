@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import toast from 'react-hot-toast'
 import { activatePackageCallable, resolveUsernameCallable } from '@/lib/api/financeCallables'
+import { splitTopupWalletDebit } from '@/lib/finance/splitTopupWallet'
 import { useAuthState } from '@/hooks/useAuth'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
@@ -41,6 +42,15 @@ export function PackageTopupPage() {
     () => catalog.find((p) => p.id === selectedPackageId),
     [catalog, selectedPackageId],
   )
+
+  const amountNum = Number(amountInput)
+  const splitPreview = useMemo(() => {
+    if (!selectedPkg || !Number.isFinite(amountNum) || amountNum <= 0) return null
+    const min = Math.min(selectedPkg.minAmount, selectedPkg.maxAmount)
+    const max = Math.max(selectedPkg.minAmount, selectedPkg.maxAmount)
+    if (amountNum < min || amountNum > max) return null
+    return splitTopupWalletDebit(amountNum)
+  }, [selectedPkg, amountNum])
 
   useEffect(() => {
     const q = query(collection(db, COLLECTIONS.packages), where('active', '==', true))
@@ -146,7 +156,7 @@ export function PackageTopupPage() {
     } catch (err: unknown) {
       const msg =
         err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : ''
-      toast.error(msg || 'Topup failed — check wallets, deposit 50% rule, and deploy latest functions')
+      toast.error(msg || 'Topup failed — need 50% in Activation and 50% in Deposit wallet (deploy latest functions)')
     } finally {
       setBusy(false)
     }
@@ -167,7 +177,7 @@ export function PackageTopupPage() {
             <div className="card">
               <div className="card-header">
                 <h4 className="card-title mb-0">
-                  Buy Package (Activation Wallet - $ {act.toFixed(2)}, Deposit Wallet - $ {dep.toFixed(2)})
+                  Buy Package — Activation ${act.toFixed(2)} · Deposit ${dep.toFixed(2)}
                 </h4>
               </div>
               <div className="card-body">
@@ -244,6 +254,12 @@ export function PackageTopupPage() {
                           disabled={busy || fixedAmountOnly}
                           required
                         />
+                        {splitPreview ? (
+                          <p className="mt-2 mb-0 small text-muted">
+                            Debit: <strong>${splitPreview.activation.toFixed(2)}</strong> from Activation +{' '}
+                            <strong>${splitPreview.deposit.toFixed(2)}</strong> from Deposit (50% / 50%).
+                          </p>
+                        ) : null}
                       </div>
                     )}
                     <select
@@ -277,7 +293,8 @@ export function PackageTopupPage() {
                     </button>
                   </form>
                   <p className="mt-3 mb-0 small text-secondary">
-                    Note :- Minimum a 50 % of value is required in Deposit Wallet.
+                    Payment is split <strong>50%</strong> from your Activation wallet and <strong>50%</strong> from your
+                    Deposit wallet (total equals the package amount).
                   </p>
                 </div>
               </div>

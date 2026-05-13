@@ -139,6 +139,15 @@ function isWithinWithdrawalWindow(policy, date = new Date()) {
         return nowM >= s && nowM <= e;
     return nowM >= s || nowM <= e;
 }
+/** Package top-up: 50% from activation wallet, 50% from deposit (cent-safe; halves sum to `amount`). */
+function splitTopupWalletDebit(amount) {
+    const cents = Math.round(amount * 100);
+    if (cents <= 0)
+        return { activation: 0, deposit: 0 };
+    const halfActCents = Math.floor(cents / 2);
+    const halfDepCents = cents - halfActCents;
+    return { activation: halfActCents / 100, deposit: halfDepCents / 100 };
+}
 /** Non-working daily ROI cap as × principal; explicit `0` on the package = no non-working ROI. */
 function resolveNonWorkingCapMultiplierFromPackage(pkg, siteDefault) {
     if (Object.prototype.hasOwnProperty.call(pkg, 'maxRoiMultiplier') && pkg.maxRoiMultiplier != null) {
@@ -1053,10 +1062,12 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
     if (amount < minAmount || amount > maxAmount) {
         throw new https_1.HttpsError('invalid-argument', 'Amount out of range');
     }
+    const splitDebit = splitTopupWalletDebit(amount);
     const callerWallets = caller.wallets;
-    const deposit = Number(callerWallets?.deposit ?? 0);
-    if (deposit < amount * 0.5) {
-        throw new https_1.HttpsError('failed-precondition', 'Minimum 50% of package value is required in Deposit Wallet');
+    const depositBal = Number(callerWallets?.deposit ?? 0);
+    const activationBalPre = Number(callerWallets?.activation ?? 0);
+    if (activationBalPre < splitDebit.activation || depositBal < splitDebit.deposit) {
+        throw new https_1.HttpsError('failed-precondition', `Package purchase splits 50/50: need $${splitDebit.activation.toFixed(2)} in Activation Wallet and $${splitDebit.deposit.toFixed(2)} in Deposit Wallet (total $${amount.toFixed(2)})`);
     }
     const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get();
     const settings = settingsSnap.data() ?? {};
@@ -1137,10 +1148,13 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
             throw new https_1.HttpsError('not-found', 'User missing');
         const wallets = uSnap.data()?.wallets;
         const act = Number(wallets?.activation ?? 0);
-        if (act < amount)
-            throw new https_1.HttpsError('failed-precondition', 'Insufficient activation wallet');
+        const depW = Number(wallets?.deposit ?? 0);
+        if (act < splitDebit.activation || depW < splitDebit.deposit) {
+            throw new https_1.HttpsError('failed-precondition', 'Insufficient activation or deposit wallet for 50/50 split');
+        }
         tx.update(uRef, {
-            'wallets.activation': act - amount,
+            'wallets.activation': act - splitDebit.activation,
+            'wallets.deposit': depW - splitDebit.deposit,
             updatedAt: Date.now(),
         });
         const now = firestore_1.Timestamp.now();
