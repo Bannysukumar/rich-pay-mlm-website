@@ -20,11 +20,25 @@ export function livePolicyFromSiteSettings(s: SiteSettings): WithdrawPolicy {
   }
 }
 
+/**
+ * Per-user `withdrawalPolicySnapshot` may only override **package-based** withdrawal caps
+ * (`withdrawPackageCaps`, `defaultWithdrawalPercentOfPackage`) captured at activation.
+ * Min withdrawal, fee %, time window, and enabled flags always follow live `siteSettings`.
+ */
 export function mergeWithdrawPolicy(live: WithdrawPolicy, frozen?: Record<string, unknown> | null): WithdrawPolicy {
-  if (frozen && typeof frozen === 'object' && Object.keys(frozen).length > 0) {
-    return { ...live, ...frozen }
+  if (!frozen || typeof frozen !== 'object' || Object.keys(frozen).length === 0) {
+    return { ...live }
   }
-  return { ...live }
+  const merged = { ...live }
+  const caps = frozen.withdrawPackageCaps
+  if (Array.isArray(caps) && caps.length > 0) {
+    merged.withdrawPackageCaps = caps
+  }
+  const defPct = frozen.defaultWithdrawalPercentOfPackage
+  if (defPct !== undefined && Number.isFinite(Number(defPct))) {
+    merged.defaultWithdrawalPercentOfPackage = Number(defPct)
+  }
+  return merged
 }
 
 export function wallClockMinutes(date: Date, timeZone: string): number | null {

@@ -110,6 +110,22 @@ function freezeWithdrawPolicyFromSettings(settings) {
         defaultWithdrawalPercentOfPackage: Number(settings.defaultWithdrawalPercentOfPackage ?? 20),
     };
 }
+/** Keep in sync with `mergeWithdrawPolicy` in `src/lib/withdrawPolicy.ts`. */
+function mergeWithdrawPolicyForUser(livePol, frozen) {
+    if (!frozen || typeof frozen !== 'object' || Object.keys(frozen).length === 0) {
+        return { ...livePol };
+    }
+    const merged = { ...livePol };
+    const caps = frozen.withdrawPackageCaps;
+    if (Array.isArray(caps) && caps.length > 0) {
+        merged.withdrawPackageCaps = caps;
+    }
+    const defPct = frozen.defaultWithdrawalPercentOfPackage;
+    if (defPct !== undefined && Number.isFinite(Number(defPct))) {
+        merged.defaultWithdrawalPercentOfPackage = Number(defPct);
+    }
+    return merged;
+}
 function wallClockMinutes(date, timeZone) {
     try {
         const fmt = new Intl.DateTimeFormat('en-GB', {
@@ -1255,9 +1271,7 @@ exports.createWithdrawal = (0, https_1.onCall)(callableRuntimeOpts, async (reque
     const liveSettings = settingsSnap.data() ?? {};
     const livePol = freezeWithdrawPolicyFromSettings(liveSettings);
     const frozen = caller.withdrawalPolicySnapshot;
-    const policy = frozen && typeof frozen === 'object' && Object.keys(frozen).length > 0
-        ? { ...livePol, ...frozen }
-        : livePol;
+    const policy = mergeWithdrawPolicyForUser(livePol, frozen);
     if (policy.withdrawalsEnabled === false) {
         throw new https_1.HttpsError('failed-precondition', 'Withdrawals are temporarily disabled');
     }

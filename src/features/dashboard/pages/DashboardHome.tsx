@@ -104,8 +104,6 @@ export function DashboardHome() {
   const { settings } = useSiteSettings()
   const [activePackageTotal, setActivePackageTotal] = useState<number | undefined>(undefined)
   const [maxActivePrincipal, setMaxActivePrincipal] = useState<number | undefined>(undefined)
-  const [nonWorkingCapSum, setNonWorkingCapSum] = useState<number | undefined>(undefined)
-  const [workingCapSum, setWorkingCapSum] = useState<number | undefined>(undefined)
 
   const refLink = useMemo(() => {
     if (!profile?.username) return ''
@@ -117,8 +115,6 @@ export function DashboardHome() {
     if (!firebaseUid) {
       setActivePackageTotal(undefined)
       setMaxActivePrincipal(undefined)
-      setNonWorkingCapSum(undefined)
-      setWorkingCapSum(undefined)
       return
     }
     const q = query(
@@ -131,41 +127,24 @@ export function DashboardHome() {
       (snap) => {
         let sum = 0
         let maxOne = 0
-        let nwCap = 0
-        let wCap = 0
-        const nwDefault = Number(settings.nonWorkingIncomeCapMultiplier ?? 2)
-        const wDefault = Number(settings.workingIncomeCapMultiplier ?? 3)
         snap.forEach((doc) => {
           const d = doc.data()
           if (String(d.status ?? 'active').toLowerCase() === 'active') {
             const amt = Number(d.amount ?? 0)
             sum += amt
             maxOne = Math.max(maxOne, amt)
-            const ps = d.planSnapshot as Record<string, unknown> | undefined
-            const nwM = Number(
-              d.frozenNonWorkingCapMultiplier ??
-                ps?.nonWorkingIncomeCapMultiplier ??
-                nwDefault,
-            )
-            const wM = Number(d.frozenWorkingCapMultiplier ?? ps?.workingIncomeCapMultiplier ?? wDefault)
-            nwCap += amt * Math.max(0, nwM)
-            wCap += amt * Math.max(0, wM)
           }
         })
         setActivePackageTotal(sum)
         setMaxActivePrincipal(maxOne)
-        setNonWorkingCapSum(nwCap)
-        setWorkingCapSum(wCap)
       },
       () => {
         setActivePackageTotal(0)
         setMaxActivePrincipal(0)
-        setNonWorkingCapSum(0)
-        setWorkingCapSum(0)
         toast.error('Could not load active package total')
       },
     )
-  }, [firebaseUid, settings.nonWorkingIncomeCapMultiplier, settings.workingIncomeCapMultiplier])
+  }, [firebaseUid])
 
   const withdrawalPolicyMerged = useMemo(
     () =>
@@ -237,14 +216,6 @@ export function DashboardHome() {
 
   const feePct = Number(withdrawalPolicyMerged.withdrawFeePercent ?? settings.withdrawFeePercent)
   const minWd = Number(withdrawalPolicyMerged.minWithdrawal ?? settings.minWithdrawal)
-  const principalSum = Number(activePackageTotal ?? 0)
-  const workingCap = workingCapSum ?? principalSum * Math.max(0, Number(settings.workingIncomeCapMultiplier ?? 3))
-  const nonWorkingCap =
-    nonWorkingCapSum ?? principalSum * Math.max(0, Number(settings.nonWorkingIncomeCapMultiplier ?? 2))
-  const workingEarned = Number(profile.totalWorkingIncome ?? profile.workingIncomeBalance ?? 0)
-  const nonWorkingEarned = Number(profile.dailyProfitsTotal ?? profile.nonWorkingIncomeBalance ?? 0)
-  const workingRemaining = Math.max(0, workingCap - workingEarned)
-  const nonWorkingRemaining = Math.max(0, nonWorkingCap - nonWorkingEarned)
   const capLine =
     !Number.isFinite(maxWithdrawThisCycle)
       ? 'No per-request cap (policy)'
@@ -255,11 +226,8 @@ export function DashboardHome() {
   type Stat = { label: string; value: string; tone: 'warning' | 'primary' | 'danger' | 'success' }
   const row1: Stat[] = [
     {
-      label: 'Your Package (active · largest stake)',
-      value:
-        activePackageTotal === undefined || maxActivePrincipal === undefined
-          ? '$ …'
-          : `$ ${fmt(activePackageTotal)} total · max $ ${fmt(maxActivePrincipal)}`,
+      label: 'Active packages (total)',
+      value: activePackageTotal === undefined ? '$ …' : `$ ${fmt(activePackageTotal)}`,
       tone: 'warning',
     },
     { label: 'Cash Wallet', value: `$ ${fmt(profile.wallets.cash)}`, tone: 'primary' },
@@ -274,19 +242,6 @@ export function DashboardHome() {
     { label: 'Daily Profits', value: `$ ${fmt(profile.dailyProfitsTotal)}`, tone: 'warning' },
     { label: 'Team Level Commission', value: `$ ${fmt(profile.teamLevelCommissionTotal)}`, tone: 'success' },
     { label: 'Ranking Bonus (total)', value: `$ ${fmt(profile.rankCommissionTotal)}`, tone: 'success' },
-  ]
-
-  const row3: Stat[] = [
-    {
-      label: 'Non-working — earned / remaining (per-tier caps)',
-      value: `$ ${fmt(nonWorkingEarned)} / $ ${fmt(nonWorkingRemaining)}`,
-      tone: 'primary',
-    },
-    {
-      label: 'Working — earned / remaining (per-tier caps)',
-      value: `$ ${fmt(workingEarned)} / $ ${fmt(workingRemaining)}`,
-      tone: 'danger',
-    },
   ]
 
   const row4: Stat[] = [
@@ -445,9 +400,6 @@ export function DashboardHome() {
       </div>
       <div className="mt-2">
         <StatGrid items={row2} />
-      </div>
-      <div className="mt-2">
-        <StatGrid items={row3} />
       </div>
       <div className="mt-2">
         <StatGrid items={row4} />
