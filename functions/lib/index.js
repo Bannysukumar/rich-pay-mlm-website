@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.adminDeleteMember = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
+exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.adminDeleteMember = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.requestPasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
 const node_crypto_1 = require("node:crypto");
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -1039,6 +1039,108 @@ exports.publicResolveReferrer = (0, https_1.onCall)(callableRuntimeOpts, async (
         return { found: false, fullName: '' };
     const fn = String(uSnap.data().fullName ?? '').trim();
     return { found: true, fullName: fn || '—' };
+});
+const LOGIN_SYNTHETIC_EMAIL_DOMAIN = 'richpay.local';
+function isValidEmailForReset(v) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+}
+function resolveAuthEmailForUsername(username, mapData) {
+    const alt = mapData?.authEmail;
+    if (typeof alt === 'string') {
+        const e = alt.trim().toLowerCase();
+        if (isValidEmailForReset(e))
+            return e;
+    }
+    return `${username.trim().toLowerCase()}@${LOGIN_SYNTHETIC_EMAIL_DOMAIN}`;
+}
+/** Firebase Identity Toolkit — sends the same template email as client `sendPasswordResetEmail`. */
+async function sendPasswordResetOob(apiKey, signInEmail, continueUrl) {
+    const key = apiKey.trim();
+    if (key.length < 10) {
+        throw new Error('Invalid or missing Firebase Web API key.');
+    }
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(key)}`;
+    const body = {
+        requestType: 'PASSWORD_RESET',
+        email: signInEmail,
+    };
+    const cu = continueUrl?.trim();
+    if (cu)
+        body.continueUrl = cu;
+    const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    const j = (await r.json());
+    if (!r.ok) {
+        const msg = j.error?.message ?? r.statusText;
+        throw new Error(String(msg));
+    }
+}
+/**
+ * Public: user supplies numeric UserID + registered email. If they match Firestore / Auth mapping,
+ * Firebase sends a password reset link to the **Auth sign-in email** (real email or synthetic @richpay.local).
+ */
+exports.requestPasswordReset = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
+    const data = request.data;
+    const username = String(data.username ?? '').trim().toLowerCase();
+    const emailInput = String(data.email ?? '').trim().toLowerCase();
+    const webApiKey = process.env.FIREBASE_WEB_API_KEY?.trim() || String(data.firebaseWebApiKey ?? '').trim();
+    if (!/^\d{4,12}$/.test(username)) {
+        return { sent: false, message: 'Enter your numeric UserID (for example 9994549).' };
+    }
+    if (!isValidEmailForReset(emailInput)) {
+        return { sent: false, message: 'Enter the email address registered on your account.' };
+    }
+    const mapSnap = await db.collection(COL_USERS_BY_UN).doc(username).get();
+    if (!mapSnap.exists) {
+        return { sent: false, message: 'UserID and email do not match our records.' };
+    }
+    const mapData = mapSnap.data();
+    const uid = String(mapData?.uid ?? '');
+    if (!uid) {
+        return { sent: false, message: 'UserID and email do not match our records.' };
+    }
+    const userSnap = await db.collection(COL_USERS).doc(uid).get();
+    if (!userSnap.exists) {
+        return { sent: false, message: 'UserID and email do not match our records.' };
+    }
+    const uData = userSnap.data();
+    const profileEmail = String(uData?.email ?? '').trim().toLowerCase();
+    const mapAuthEmail = typeof mapData?.authEmail === 'string' ? String(mapData.authEmail).trim().toLowerCase() : '';
+    const signInEmail = resolveAuthEmailForUsername(username, mapData);
+    const emailOk = emailInput === profileEmail ||
+        (mapAuthEmail.length > 0 && emailInput === mapAuthEmail) ||
+        emailInput === signInEmail.toLowerCase();
+    if (!emailOk) {
+        return { sent: false, message: 'UserID and email do not match our records.' };
+    }
+    try {
+        await admin.auth().getUser(uid);
+    }
+    catch {
+        return { sent: false, message: 'Could not send a reset email for this account. Contact support.' };
+    }
+    const continueUrl = process.env.PASSWORD_RESET_CONTINUE_URL?.trim();
+    try {
+        await sendPasswordResetOob(webApiKey, signInEmail, continueUrl);
+    }
+    catch (e) {
+        console.warn('[requestPasswordReset] sendOobCode failed', e);
+        const detail = e instanceof Error ? e.message : String(e);
+        return {
+            sent: false,
+            message: webApiKey.length < 10
+                ? 'Password reset is not configured. Set VITE_FIREBASE_API_KEY in the app build, or set FIREBASE_WEB_API_KEY on Cloud Functions.'
+                : `Could not send the reset email (${detail}). Try again or contact support.`,
+        };
+    }
+    void audit(uid, 'requestPasswordReset', { username }).catch(() => { });
+    return {
+        sent: true,
+        message: 'Password reset email sent. Check your inbox (and spam). Follow the link to choose a new password.',
+    };
 });
 exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
     if (!request.auth?.uid)

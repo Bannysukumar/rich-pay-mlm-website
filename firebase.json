@@ -27,6 +27,10 @@
         "function": { "functionName": "publicResolveReferrer", "region": "us-central1" }
       },
       {
+        "source": "/api/call/requestPasswordReset",
+        "function": { "functionName": "requestPasswordReset", "region": "us-central1" }
+      },
+      {
         "source": "/api/call/updateMemberProfile",
         "function": { "functionName": "updateMemberProfile", "region": "us-central1" }
       },

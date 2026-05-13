@@ -188,16 +188,9 @@ export function LoginPage() {
               />
               {errors.password ? <p className="auth-field-error">{errors.password.message}</p> : null}
               <div className="auth-forgot-wrap">
-                <a
-                  href="#forgot"
-                  className="text-gold auth-forgot-link"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    toast('Contact support to recover your password.')
-                  }}
-                >
+                <Link to="/forgot-password" className="text-gold auth-forgot-link">
                   Forgot Password?
-                </a>
+                </Link>
               </div>
             </div>
 

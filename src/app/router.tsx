@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { ProtectedRoute } from '@/components/routing/ProtectedRoute'
 import { LogoutPage } from '@/features/auth/LogoutPage'
+import { ForgotPasswordPage } from '@/features/auth/ForgotPasswordPage'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { RegisterPage } from '@/features/auth/RegisterPage'
 import { RegisterSuccessPage } from '@/features/auth/RegisterSuccessPage'
@@ -127,6 +128,7 @@ export function AppRouter() {
       <Route path="/plans" element={<PublicInvestmentPlans />} />
       <Route path="/contact" element={<PublicContact />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/register/success" element={<RegisterSuccessPage />} />
       <Route path="/logout" element={<LogoutPage />} />

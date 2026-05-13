@@ -1169,6 +1169,127 @@ export const publicResolveReferrer = onCall(callableRuntimeOpts, async (request)
   return { found: true, fullName: fn || '—' }
 })
 
+const LOGIN_SYNTHETIC_EMAIL_DOMAIN = 'richpay.local'
+
+function isValidEmailForReset(v: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())
+}
+
+function resolveAuthEmailForUsername(username: string, mapData: Record<string, unknown> | undefined): string {
+  const alt = mapData?.authEmail
+  if (typeof alt === 'string') {
+    const e = alt.trim().toLowerCase()
+    if (isValidEmailForReset(e)) return e
+  }
+  return `${username.trim().toLowerCase()}@${LOGIN_SYNTHETIC_EMAIL_DOMAIN}`
+}
+
+/** Firebase Identity Toolkit — sends the same template email as client `sendPasswordResetEmail`. */
+async function sendPasswordResetOob(
+  apiKey: string,
+  signInEmail: string,
+  continueUrl?: string,
+): Promise<void> {
+  const key = apiKey.trim()
+  if (key.length < 10) {
+    throw new Error('Invalid or missing Firebase Web API key.')
+  }
+  const url = `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(key)}`
+  const body: Record<string, string> = {
+    requestType: 'PASSWORD_RESET',
+    email: signInEmail,
+  }
+  const cu = continueUrl?.trim()
+  if (cu) body.continueUrl = cu
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const j = (await r.json()) as { error?: { message?: string } }
+  if (!r.ok) {
+    const msg = j.error?.message ?? r.statusText
+    throw new Error(String(msg))
+  }
+}
+
+/**
+ * Public: user supplies numeric UserID + registered email. If they match Firestore / Auth mapping,
+ * Firebase sends a password reset link to the **Auth sign-in email** (real email or synthetic @richpay.local).
+ */
+export const requestPasswordReset = onCall(callableRuntimeOpts, async (request) => {
+  const data = request.data as { username?: string; email?: string; firebaseWebApiKey?: string }
+  const username = String(data.username ?? '').trim().toLowerCase()
+  const emailInput = String(data.email ?? '').trim().toLowerCase()
+  const webApiKey =
+    process.env.FIREBASE_WEB_API_KEY?.trim() || String(data.firebaseWebApiKey ?? '').trim()
+
+  if (!/^\d{4,12}$/.test(username)) {
+    return { sent: false, message: 'Enter your numeric UserID (for example 9994549).' }
+  }
+  if (!isValidEmailForReset(emailInput)) {
+    return { sent: false, message: 'Enter the email address registered on your account.' }
+  }
+
+  const mapSnap = await db.collection(COL_USERS_BY_UN).doc(username).get()
+  if (!mapSnap.exists) {
+    return { sent: false, message: 'UserID and email do not match our records.' }
+  }
+  const mapData = mapSnap.data() as Record<string, unknown> | undefined
+  const uid = String(mapData?.uid ?? '')
+  if (!uid) {
+    return { sent: false, message: 'UserID and email do not match our records.' }
+  }
+
+  const userSnap = await db.collection(COL_USERS).doc(uid).get()
+  if (!userSnap.exists) {
+    return { sent: false, message: 'UserID and email do not match our records.' }
+  }
+  const uData = userSnap.data() as Record<string, unknown> | undefined
+  const profileEmail = String(uData?.email ?? '').trim().toLowerCase()
+  const mapAuthEmail =
+    typeof mapData?.authEmail === 'string' ? String(mapData.authEmail).trim().toLowerCase() : ''
+  const signInEmail = resolveAuthEmailForUsername(username, mapData)
+
+  const emailOk =
+    emailInput === profileEmail ||
+    (mapAuthEmail.length > 0 && emailInput === mapAuthEmail) ||
+    emailInput === signInEmail.toLowerCase()
+
+  if (!emailOk) {
+    return { sent: false, message: 'UserID and email do not match our records.' }
+  }
+
+  try {
+    await admin.auth().getUser(uid)
+  } catch {
+    return { sent: false, message: 'Could not send a reset email for this account. Contact support.' }
+  }
+
+  const continueUrl = process.env.PASSWORD_RESET_CONTINUE_URL?.trim()
+
+  try {
+    await sendPasswordResetOob(webApiKey, signInEmail, continueUrl)
+  } catch (e) {
+    console.warn('[requestPasswordReset] sendOobCode failed', e)
+    const detail = e instanceof Error ? e.message : String(e)
+    return {
+      sent: false,
+      message:
+        webApiKey.length < 10
+          ? 'Password reset is not configured. Set VITE_FIREBASE_API_KEY in the app build, or set FIREBASE_WEB_API_KEY on Cloud Functions.'
+          : `Could not send the reset email (${detail}). Try again or contact support.`,
+    }
+  }
+
+  void audit(uid, 'requestPasswordReset', { username }).catch(() => {})
+
+  return {
+    sent: true,
+    message: 'Password reset email sent. Check your inbox (and spam). Follow the link to choose a new password.',
+  }
+})
+
 export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')
   const uid = request.auth.uid

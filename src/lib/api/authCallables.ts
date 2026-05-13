@@ -27,3 +27,16 @@ export async function publicResolveReferrerCallable(username: string): Promise<{
   const res = await fn({ username })
   return res.data as { found: boolean; fullName: string }
 }
+
+export type PasswordResetResult = { sent: boolean; message: string }
+
+/** No auth — verifies UserID + registered email, then sends Firebase password reset email. */
+export async function requestPasswordResetCallable(payload: {
+  username: string
+  email: string
+}): Promise<PasswordResetResult> {
+  const firebaseWebApiKey = String(import.meta.env.VITE_FIREBASE_API_KEY ?? '').trim()
+  const fn = getHttpsCallable('requestPasswordReset')
+  const res = await fn({ ...payload, firebaseWebApiKey })
+  return res.data as PasswordResetResult
+}
