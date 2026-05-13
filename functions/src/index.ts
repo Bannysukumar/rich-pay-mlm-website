@@ -48,6 +48,18 @@ const COL_DEPOSITS = 'deposits'
 const COL_WITHDRAWALS = 'withdrawals'
 const COL_DAILY = 'dailyProfits'
 const COL_INTERNAL = 'internalTransfers'
+
+/**
+ * When `allowActivationTransferToAnyUser` is on, treat package top-up the same as activation
+ * transfers: any valid member UserID may receive the package (matches admin expectation on
+ * Transfer settings). When that flag is off, `restrictPackageTopupToDirectReferrals === true`
+ * limits beneficiaries to self + direct referrals only.
+ */
+function enforcePackageTopupDirectReferralOnly(settings: Record<string, unknown> | undefined): boolean {
+  const s = settings ?? {}
+  if (Boolean(s.allowActivationTransferToAnyUser)) return false
+  return s.restrictPackageTopupToDirectReferrals === true
+}
 const COL_TEAM_LEVELS = 'teamLevels'
 const COL_RANKS = 'ranks'
 
@@ -1172,7 +1184,7 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
   let beneficiaryUid = uid
   const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get()
   const settings = settingsSnap.data() ?? {}
-  const restrictTopupToDirects = settings.restrictPackageTopupToDirectReferrals === true
+  const restrictTopupToDirects = enforcePackageTopupDirectReferralOnly(settings as Record<string, unknown>)
 
   if (beneRaw && beneRaw !== callerUsername) {
     const mapSnap = await db.collection(COL_USERS_BY_UN).doc(beneRaw).get()
@@ -1183,7 +1195,10 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
     if (restrictTopupToDirects) {
       const sponsorOfBene = beneSnap.data()?.sponsorUid as string | undefined
       if (sponsorOfBene !== uid) {
-        throw new HttpsError('permission-denied', 'You can only topup your direct referrals or yourself')
+        throw new HttpsError(
+          'permission-denied',
+          'You can only topup your direct referrals or yourself (or enable “Activation transfers: allow any member UserID” in Transfer settings to allow any UserID).',
+        )
       }
     }
   }

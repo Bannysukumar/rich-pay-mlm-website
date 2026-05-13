@@ -24,7 +24,10 @@ function sortPackages(list: PackageDef[]): PackageDef[] {
 export function PackageTopupPage() {
   const { profile } = useAuthState()
   const { settings } = useSiteSettings()
-  const topupRestrictToDirectReferrals = settings.restrictPackageTopupToDirectReferrals === true
+  /** Must match Cloud Function `activatePackage` (see `enforcePackageTopupDirectReferralOnly`). */
+  const topupRestrictToDirectReferrals =
+    settings.restrictPackageTopupToDirectReferrals === true &&
+    settings.allowActivationTransferToAnyUser !== true
   const [packages, setPackages] = useState<PackageDef[]>([])
   const [selectedPackageId, setSelectedPackageId] = useState('')
   const [amountInput, setAmountInput] = useState('')

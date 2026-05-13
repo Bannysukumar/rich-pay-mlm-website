@@ -91,7 +91,9 @@ export function AdminTransferSettingsPage() {
           <span>
             Package top-up: only yourself or <strong className="text-zinc-200">direct referrals</strong> (UserID must
             be your downline). <strong className="text-zinc-400">Unchecked</strong> = any member may receive a package
-            top-up from the payer (<code className="text-zinc-500">activatePackage</code>).
+            top-up from the payer (<code className="text-zinc-500">activatePackage</code>). If{' '}
+            <strong className="text-zinc-400">Activation transfers: allow any member UserID</strong> is on, package
+            top-ups may go to <strong className="text-zinc-200">any</strong> member UserID regardless of this box.
           </span>
         </label>
         <div>
