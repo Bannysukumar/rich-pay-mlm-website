@@ -2,6 +2,7 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   limit,
   onSnapshot,
@@ -68,6 +69,10 @@ export function AdminPackagesPage() {
           description: d.description != null ? String(d.description) : '',
           sortOrder: Number(d.sortOrder ?? 0),
           maxRoiMultiplier: Number(d.maxRoiMultiplier ?? 2),
+          workingIncomeCapMultiplier:
+            d.workingIncomeCapMultiplier != null && d.workingIncomeCapMultiplier !== ''
+              ? Number(d.workingIncomeCapMultiplier)
+              : undefined,
           packageShelf,
         })
       })
@@ -95,6 +100,7 @@ export function AdminPackagesPage() {
       description: '',
       sortOrder: rows.length ? Math.max(...rows.map((r) => r.sortOrder ?? 0)) + 10 : 0,
       maxRoiMultiplier: 2,
+      workingIncomeCapMultiplier: undefined,
       packageShelf: shelfTab,
     }),
     [rows, shelfTab],
@@ -103,7 +109,8 @@ export function AdminPackagesPage() {
   const persist = useCallback(async (maybeId: string | undefined, data: Omit<Row, 'id'>) => {
     setBusy(true)
     try {
-      const payload = {
+      const wCap = data.workingIncomeCapMultiplier
+      const payload: Record<string, unknown> = {
         name: data.name.trim(),
         minAmount: Number(data.minAmount),
         maxAmount: Number(data.maxAmount),
@@ -115,6 +122,11 @@ export function AdminPackagesPage() {
         maxRoiMultiplier: Number(data.maxRoiMultiplier ?? 2),
         packageShelf: data.packageShelf ?? 'investment',
         updatedAt: serverTimestamp(),
+      }
+      if (wCap !== undefined && wCap !== null && String(wCap).trim() !== '' && Number.isFinite(Number(wCap))) {
+        payload.workingIncomeCapMultiplier = Math.max(0, Number(wCap))
+      } else if (maybeId) {
+        payload.workingIncomeCapMultiplier = deleteField()
       }
       if (maybeId) {
         await updateDoc(doc(db, COLLECTIONS.packages, maybeId), payload)
@@ -215,6 +227,9 @@ export function AdminPackagesPage() {
         description: `${r.description ?? ''} cloned`,
         sortOrder: (r.sortOrder ?? 0) + 1,
         maxRoiMultiplier: r.maxRoiMultiplier ?? 2,
+        ...(r.workingIncomeCapMultiplier != null && Number.isFinite(r.workingIncomeCapMultiplier)
+          ? { workingIncomeCapMultiplier: r.workingIncomeCapMultiplier }
+          : {}),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       })
@@ -378,15 +393,40 @@ function PackageForm({
         <Field label="Duration (days)">
           <Input type="number" value={f.durationDays} onChange={(e) => set('durationDays')(Number(e.target.value))} />
         </Field>
-        <Field label="Max payout multiplier vs principal">
+        <Field label="Non-working cap (× principal)">
           <Input
             type="number"
             step="0.1"
+            min={0}
             value={f.maxRoiMultiplier ?? 2}
             onChange={(e) => set('maxRoiMultiplier')(Number(e.target.value))}
           />
+          <p className="text-[10px] text-zinc-600">Daily ROI stops when this stake reaches this multiple (e.g. 2 = 2×).</p>
+        </Field>
+        <Field label="Working cap (× principal)">
+          <Input
+            type="number"
+            step="0.1"
+            min={0}
+            placeholder="Site default"
+            value={f.workingIncomeCapMultiplier ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value.trim()
+              setF((s) => ({
+                ...s,
+                workingIncomeCapMultiplier: raw === '' ? undefined : Number(raw),
+              }))
+            }}
+          />
+          <p className="text-[10px] text-zinc-600">
+            Sponsor / team / rank share uses this multiple vs stake; leave empty to use Wallet settings default.
+          </p>
         </Field>
       </div>
+      <p className="text-[11px] text-zinc-500">
+        Max theoretical combined ceiling ≈ (non-working + working) × package amount (e.g. 2 + 1 = 3×). Referral income
+        requires an active package until the plan ends.
+      </p>
       <Field label="Description">
         <textarea
           value={f.description ?? ''}

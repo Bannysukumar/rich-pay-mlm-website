@@ -117,7 +117,26 @@ const settings = cfgSnap.data() ?? {}
 const teamDepth = Math.min(100, Math.max(1, Number(settings.teamLevelsCount ?? 30)))
 const sponsorPctFrozen = Number(settings.sponsorPercent ?? 5)
 const siteNwMult = Number(settings.nonWorkingIncomeCapMultiplier ?? 2)
-const frozenWorkingCapMultiplier = Number(settings.workingIncomeCapMultiplier ?? 3)
+const siteWMult = Number(settings.workingIncomeCapMultiplier ?? 3)
+
+function resolveNonWorkingCapMultiplierFromPackage(pkg, siteDefault) {
+  if (Object.prototype.hasOwnProperty.call(pkg, 'maxRoiMultiplier') && pkg.maxRoiMultiplier != null) {
+    const n = Number(pkg.maxRoiMultiplier)
+    if (Number.isFinite(n)) return Math.max(0, n)
+  }
+  return Math.max(0, siteDefault)
+}
+
+function resolveWorkingCapMultiplierFromPackage(pkg, siteDefault) {
+  if (
+    Object.prototype.hasOwnProperty.call(pkg, 'workingIncomeCapMultiplier') &&
+    pkg.workingIncomeCapMultiplier != null
+  ) {
+    const n = Number(pkg.workingIncomeCapMultiplier)
+    if (Number.isFinite(n)) return Math.max(0, n)
+  }
+  return Math.max(0, siteDefault)
+}
 const stopAllIncomeFrozen = settings.stopAllIncomeWhenWorkingCapReached === true
 const minWithdrawFrozen = Number(settings.minWithdrawal ?? 10)
 const withdrawFeeFrozen = Number(settings.withdrawFeePercent ?? 10)
@@ -239,8 +258,9 @@ for (const r of records) {
     const startedAtTs = Timestamp.fromMillis(r.startedAtMillis)
     const endsAtTs = Timestamp.fromMillis(r.startedAtMillis + Number(pkg.durationDays) * 86400000)
     const planLabel = String(pkg.packageShelf ?? '').toLowerCase() === 'compounding' ? 'compounding' : 'daily'
-    const pkgNwMult = Number(pkg.maxRoiMultiplier ?? 2)
-    const frozenNonWorkingCapMultiplier = pkgNwMult > 0 ? pkgNwMult : siteNwMult
+    const frozenNonWorkingCapMultiplier = resolveNonWorkingCapMultiplierFromPackage(pkg, siteNwMult)
+    const frozenWorkingCapMultiplier = resolveWorkingCapMultiplierFromPackage(pkg, siteWMult)
+    const totalIncomeMult = frozenNonWorkingCapMultiplier + frozenWorkingCapMultiplier
     const capturedAt = r.startedAtMillis
 
     const planSnapshot = {
@@ -260,8 +280,9 @@ for (const r of records) {
       workingIncomeCapMultiplier: frozenWorkingCapMultiplier,
       nonWorkingCap: r.amount * Math.max(frozenNonWorkingCapMultiplier, 0),
       workingCap: r.amount * Math.max(frozenWorkingCapMultiplier, 0),
-      totalReturnMultiplier: frozenNonWorkingCapMultiplier,
-      totalReturnPercent: frozenNonWorkingCapMultiplier * 100,
+      totalIncomeCapMultiplier: totalIncomeMult,
+      totalReturnMultiplier: totalIncomeMult,
+      totalReturnPercent: totalIncomeMult * 100,
       sponsorPercent: sponsorPctFrozen,
       minWithdrawal: minWithdrawFrozen,
       withdrawFeePercent: withdrawFeeFrozen,

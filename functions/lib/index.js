@@ -139,6 +139,25 @@ function isWithinWithdrawalWindow(policy, date = new Date()) {
         return nowM >= s && nowM <= e;
     return nowM >= s || nowM <= e;
 }
+/** Non-working daily ROI cap as × principal; explicit `0` on the package = no non-working ROI. */
+function resolveNonWorkingCapMultiplierFromPackage(pkg, siteDefault) {
+    if (Object.prototype.hasOwnProperty.call(pkg, 'maxRoiMultiplier') && pkg.maxRoiMultiplier != null) {
+        const n = Number(pkg.maxRoiMultiplier);
+        if (Number.isFinite(n))
+            return Math.max(0, n);
+    }
+    return Math.max(0, siteDefault);
+}
+/** Working-income (sponsor / team / rank) cap as × stake; omit field on package → site default. */
+function resolveWorkingCapMultiplierFromPackage(pkg, siteDefault) {
+    if (Object.prototype.hasOwnProperty.call(pkg, 'workingIncomeCapMultiplier') &&
+        pkg.workingIncomeCapMultiplier != null) {
+        const n = Number(pkg.workingIncomeCapMultiplier);
+        if (Number.isFinite(n))
+            return Math.max(0, n);
+    }
+    return Math.max(0, siteDefault);
+}
 async function maxActivePrincipalForUser(uid) {
     const snap = await db.collection(COL_ACTIVE).where('userId', '==', uid).where('status', '==', 'active').get();
     let mx = 0;
@@ -1043,10 +1062,11 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
     const settings = settingsSnap.data() ?? {};
     const teamDepth = Math.min(100, Math.max(1, Number(settings.teamLevelsCount ?? 30)));
     const sponsorPctFrozen = Number(settings.sponsorPercent ?? 5);
-    const pkgNwMult = Number(pkg.maxRoiMultiplier ?? 2);
     const siteNwMult = Number(settings.nonWorkingIncomeCapMultiplier ?? 2);
-    const frozenNonWorkingCapMultiplier = pkgNwMult > 0 ? pkgNwMult : siteNwMult;
-    const frozenWorkingCapMultiplier = Number(settings.workingIncomeCapMultiplier ?? 3);
+    const siteWMult = Number(settings.workingIncomeCapMultiplier ?? 3);
+    const frozenNonWorkingCapMultiplier = resolveNonWorkingCapMultiplierFromPackage(pkg, siteNwMult);
+    const frozenWorkingCapMultiplier = resolveWorkingCapMultiplierFromPackage(pkg, siteWMult);
+    const totalIncomeMult = frozenNonWorkingCapMultiplier + frozenWorkingCapMultiplier;
     const stopAllIncomeFrozen = settings.stopAllIncomeWhenWorkingCapReached === true;
     const minWithdrawFrozen = Number(settings.minWithdrawal ?? 10);
     const withdrawFeeFrozen = Number(settings.withdrawFeePercent ?? 10);
@@ -1087,8 +1107,10 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
         workingIncomeCapMultiplier: frozenWorkingCapMultiplier,
         nonWorkingCap: amount * Math.max(frozenNonWorkingCapMultiplier, 0),
         workingCap: amount * Math.max(frozenWorkingCapMultiplier, 0),
-        totalReturnMultiplier: frozenNonWorkingCapMultiplier,
-        totalReturnPercent: frozenNonWorkingCapMultiplier * 100,
+        /** Combined ceiling multiple (non-working + working) vs principal — informational at activation. */
+        totalIncomeCapMultiplier: totalIncomeMult,
+        totalReturnMultiplier: totalIncomeMult,
+        totalReturnPercent: totalIncomeMult * 100,
         sponsorPercent: sponsorPctFrozen,
         minWithdrawal: minWithdrawFrozen,
         withdrawFeePercent: withdrawFeeFrozen,
@@ -2094,9 +2116,8 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
             2);
         const cap = amount * Math.max(nwMult, 0);
         const headroom = Math.max(0, cap - nonWorkingPaid);
+        /** NW bucket full — stay `active` so sponsor/team income can continue until plan ends or working cap is hit. */
         if (headroom <= 1e-12) {
-            await docSnap.ref.set({ status: 'capped', updatedAt: now }, { merge: true });
-            await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(userId);
             continue;
         }
         const planTypeStr = String((planSnap && planSnap.planType != null ? planSnap.planType : null) ?? ap.planType ?? 'daily').toLowerCase();
@@ -2113,7 +2134,7 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
         if (compound)
             patch.compoundingBalance = bal + daily;
         if (hitCap) {
-            patch.status = 'capped';
+            patch.nonWorkingRoiSaturated = true;
         }
         await docSnap.ref.update(patch);
         await db.collection(COL_USERS).doc(userId).update({
@@ -2129,9 +2150,6 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
         await distributeTeamLevelIncomeFromDailyRoi(docSnap.id, userId, daily, planSnap);
-        if (hitCap) {
-            await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(userId);
-        }
     }
 });
 /**

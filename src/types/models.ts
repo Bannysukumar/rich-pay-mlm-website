@@ -127,8 +127,13 @@ export interface PackageDef {
   packageShelf?: PackageShelf
   /** Lower sorts first when listing packages for members (admin-managed). */
   sortOrder?: number
-  /** Non-working ROI ceiling as multiple of principal (PDF: 2× = 200%). */
+  /** Non-working (daily ROI) income ceiling as multiple of principal (e.g. 2 = up to 2× stake). */
   maxRoiMultiplier?: number
+  /**
+   * Working (sponsor / team / rank allocation) ceiling as multiple of this package amount.
+   * When omitted, new activations use site `workingIncomeCapMultiplier` from settings.
+   */
+  workingIncomeCapMultiplier?: number
 }
 
 /** Admin-configurable per-tier withdrawal cap (Firestore `withdrawPackageCaps` on siteSettings/config). */
@@ -158,6 +163,8 @@ export interface ActivePackage {
   workingPaid: number
   workingIncomeEarned?: number
   status: 'active' | 'completed' | 'capped'
+  /** Set when non-working (daily) ROI has reached its cap; package may still be `active` for working income until `endsAt`. */
+  nonWorkingRoiSaturated?: boolean
   /** When true, `processDailyRoi` skips this package (no ROI, no team-level share from its ROI). */
   adminRoiPaused?: boolean
   frozenNonWorkingCapMultiplier?: number

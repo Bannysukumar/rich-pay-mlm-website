@@ -104,6 +104,8 @@ export function DashboardHome() {
   const { settings } = useSiteSettings()
   const [activePackageTotal, setActivePackageTotal] = useState<number | undefined>(undefined)
   const [maxActivePrincipal, setMaxActivePrincipal] = useState<number | undefined>(undefined)
+  const [nonWorkingCapSum, setNonWorkingCapSum] = useState<number | undefined>(undefined)
+  const [workingCapSum, setWorkingCapSum] = useState<number | undefined>(undefined)
 
   const refLink = useMemo(() => {
     if (!profile?.username) return ''
@@ -115,6 +117,8 @@ export function DashboardHome() {
     if (!firebaseUid) {
       setActivePackageTotal(undefined)
       setMaxActivePrincipal(undefined)
+      setNonWorkingCapSum(undefined)
+      setWorkingCapSum(undefined)
       return
     }
     const q = query(
@@ -127,24 +131,41 @@ export function DashboardHome() {
       (snap) => {
         let sum = 0
         let maxOne = 0
+        let nwCap = 0
+        let wCap = 0
+        const nwDefault = Number(settings.nonWorkingIncomeCapMultiplier ?? 2)
+        const wDefault = Number(settings.workingIncomeCapMultiplier ?? 3)
         snap.forEach((doc) => {
           const d = doc.data()
           if (String(d.status ?? 'active').toLowerCase() === 'active') {
             const amt = Number(d.amount ?? 0)
             sum += amt
             maxOne = Math.max(maxOne, amt)
+            const ps = d.planSnapshot as Record<string, unknown> | undefined
+            const nwM = Number(
+              d.frozenNonWorkingCapMultiplier ??
+                ps?.nonWorkingIncomeCapMultiplier ??
+                nwDefault,
+            )
+            const wM = Number(d.frozenWorkingCapMultiplier ?? ps?.workingIncomeCapMultiplier ?? wDefault)
+            nwCap += amt * Math.max(0, nwM)
+            wCap += amt * Math.max(0, wM)
           }
         })
         setActivePackageTotal(sum)
         setMaxActivePrincipal(maxOne)
+        setNonWorkingCapSum(nwCap)
+        setWorkingCapSum(wCap)
       },
       () => {
         setActivePackageTotal(0)
         setMaxActivePrincipal(0)
+        setNonWorkingCapSum(0)
+        setWorkingCapSum(0)
         toast.error('Could not load active package total')
       },
     )
-  }, [firebaseUid])
+  }, [firebaseUid, settings.nonWorkingIncomeCapMultiplier, settings.workingIncomeCapMultiplier])
 
   const withdrawalPolicyMerged = useMemo(
     () =>
@@ -216,11 +237,10 @@ export function DashboardHome() {
 
   const feePct = Number(withdrawalPolicyMerged.withdrawFeePercent ?? settings.withdrawFeePercent)
   const minWd = Number(withdrawalPolicyMerged.minWithdrawal ?? settings.minWithdrawal)
-  const workingMult = Number(settings.workingIncomeCapMultiplier ?? 3)
-  const nonWorkingMult = Number(settings.nonWorkingIncomeCapMultiplier ?? 2)
   const principalSum = Number(activePackageTotal ?? 0)
-  const workingCap = principalSum * Math.max(0, workingMult)
-  const nonWorkingCap = principalSum * Math.max(0, nonWorkingMult)
+  const workingCap = workingCapSum ?? principalSum * Math.max(0, Number(settings.workingIncomeCapMultiplier ?? 3))
+  const nonWorkingCap =
+    nonWorkingCapSum ?? principalSum * Math.max(0, Number(settings.nonWorkingIncomeCapMultiplier ?? 2))
   const workingEarned = Number(profile.totalWorkingIncome ?? profile.workingIncomeBalance ?? 0)
   const nonWorkingEarned = Number(profile.dailyProfitsTotal ?? profile.nonWorkingIncomeBalance ?? 0)
   const workingRemaining = Math.max(0, workingCap - workingEarned)
@@ -258,12 +278,12 @@ export function DashboardHome() {
 
   const row3: Stat[] = [
     {
-      label: 'Non Working (2x) — earned / remaining',
+      label: 'Non-working — earned / remaining (per-tier caps)',
       value: `$ ${fmt(nonWorkingEarned)} / $ ${fmt(nonWorkingRemaining)}`,
       tone: 'primary',
     },
     {
-      label: 'Working (3x) — earned / remaining',
+      label: 'Working — earned / remaining (per-tier caps)',
       value: `$ ${fmt(workingEarned)} / $ ${fmt(workingRemaining)}`,
       tone: 'danger',
     },
