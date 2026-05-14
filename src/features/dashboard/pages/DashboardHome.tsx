@@ -165,6 +165,7 @@ export function DashboardHome() {
   const [activePackageTotal, setActivePackageTotal] = useState<number | undefined>(undefined)
   const [maxActivePrincipal, setMaxActivePrincipal] = useState<number | undefined>(undefined)
   const [pkgIncomeRows, setPkgIncomeRows] = useState<PkgIncomeRow[]>([])
+  const [clockTick, setClockTick] = useState(0)
 
   const refLink = useMemo(() => {
     if (!profile?.username) return ''
@@ -228,6 +229,16 @@ export function DashboardHome() {
     )
   }, [firebaseUid, settings.nonWorkingIncomeCapMultiplier, settings.workingIncomeCapMultiplier])
 
+  useEffect(() => {
+    const id = setInterval(() => setClockTick((n) => n + 1), 15_000)
+    const onVis = () => setClockTick((n) => n + 1)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [])
+
   const withdrawalPolicyMerged = useMemo(
     () =>
       mergeWithdrawPolicy(livePolicyFromSiteSettings(settings), profile?.withdrawalPolicySnapshot ?? undefined),
@@ -244,7 +255,7 @@ export function DashboardHome() {
 
   const withdrawWindowOpen = useMemo(
     () => isWithinWithdrawalWindow(withdrawalPolicyMerged),
-    [withdrawalPolicyMerged],
+    [withdrawalPolicyMerged, clockTick],
   )
 
   const rankHud = useMemo(() => {

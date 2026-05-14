@@ -26,6 +26,7 @@ export function WithdrawPage() {
   const [busy, setBusy] = useState(false)
   const [maxPrincipal, setMaxPrincipal] = useState(0)
   const [banner, setBanner] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
+  const [clockTick, setClockTick] = useState(0)
 
   const cash = profile?.wallets.cash ?? 0
   const defaultAddress = profile?.usdtBep20Address?.trim() ?? ''
@@ -47,6 +48,16 @@ export function WithdrawPage() {
     })
   }, [firebaseUid])
 
+  useEffect(() => {
+    const id = setInterval(() => setClockTick((n) => n + 1), 15_000)
+    const onVis = () => setClockTick((n) => n + 1)
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onVis)
+    }
+  }, [])
+
   const policy = useMemo(
     () =>
       mergeWithdrawPolicy(
@@ -67,7 +78,7 @@ export function WithdrawPage() {
   const minWithdraw = Number(policy.minWithdrawal ?? settings.minWithdrawal)
   const feePercent = Number(policy.withdrawFeePercent ?? settings.withdrawFeePercent)
 
-  const windowOpen = useMemo(() => isWithinWithdrawalWindow(policy), [policy])
+  const windowOpen = useMemo(() => isWithinWithdrawalWindow(policy), [policy, clockTick])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()

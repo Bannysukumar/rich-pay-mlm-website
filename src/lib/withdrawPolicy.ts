@@ -38,6 +38,9 @@ export function mergeWithdrawPolicy(live: WithdrawPolicy, frozen?: Record<string
   if (defPct !== undefined && Number.isFinite(Number(defPct))) {
     merged.defaultWithdrawalPercentOfPackage = Number(defPct)
   }
+  merged.withdrawalWindowStart = live.withdrawalWindowStart
+  merged.withdrawalWindowEnd = live.withdrawalWindowEnd
+  merged.withdrawalWindowTimezone = live.withdrawalWindowTimezone
   return merged
 }
 
@@ -48,6 +51,9 @@ export function wallClockMinutes(date: Date, timeZone: string): number | null {
       hour: 'numeric',
       minute: 'numeric',
       hour12: false,
+      /** Avoid ambiguous 24h output across engines (esp. mobile Safari vs Node). */
+      hourCycle: 'h23',
+      calendar: 'gregory',
     })
     const parts = fmt.formatToParts(date)
     const h = Number(parts.find((p) => p.type === 'hour')?.value ?? NaN)

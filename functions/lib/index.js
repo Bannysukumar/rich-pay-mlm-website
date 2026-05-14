@@ -124,6 +124,10 @@ function mergeWithdrawPolicyForUser(livePol, frozen) {
     if (defPct !== undefined && Number.isFinite(Number(defPct))) {
         merged.defaultWithdrawalPercentOfPackage = Number(defPct);
     }
+    /** Withdrawal time window always follows live site settings (never activation snapshot). */
+    merged.withdrawalWindowStart = livePol.withdrawalWindowStart;
+    merged.withdrawalWindowEnd = livePol.withdrawalWindowEnd;
+    merged.withdrawalWindowTimezone = livePol.withdrawalWindowTimezone;
     return merged;
 }
 function wallClockMinutes(date, timeZone) {
@@ -133,6 +137,8 @@ function wallClockMinutes(date, timeZone) {
             hour: 'numeric',
             minute: 'numeric',
             hour12: false,
+            hourCycle: 'h23',
+            calendar: 'gregory',
         });
         const parts = fmt.formatToParts(date);
         const h = Number(parts.find((p) => p.type === 'hour')?.value ?? NaN);
