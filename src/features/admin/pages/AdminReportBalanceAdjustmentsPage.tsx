@@ -5,6 +5,9 @@ import {
   type LedgerMemberProfiles,
 } from '@/features/admin/components/AdminLedgerReport'
 
+/** Only list / export balance adjustments on or after 15 May 2026 (UTC midnight). */
+const REPORT_MIN_CREATED_AT_MS = Date.UTC(2026, 4, 15, 0, 0, 0, 0)
+
 const AUDIT_SOURCE = {
   kind: 'audit' as const,
   actions: ['adminWalletAdjust', 'adminAdjustMemberBalances'],
@@ -53,10 +56,11 @@ export function AdminReportBalanceAdjustmentsPage() {
   return (
     <AdminLedgerReport
       title="Balance adjustments (USDT)"
-      description="Ledger of admin wallet deltas from Member balances. Rows also appear in the full Audit log."
+      description="Ledger of admin wallet deltas from Member balances. Rows also appear in the full Audit log. Only entries from 15 May 2026 (UTC) onward are shown and included in CSV export; older audit rows are omitted."
       source={AUDIT_SOURCE}
       memberProfiles={TARGET_PROFILES}
       exportConfig={EXPORT_CONFIG}
+      minRowTimestampMs={REPORT_MIN_CREATED_AT_MS}
       columns={[
         { header: 'Time', cell: (_id, d) => ledgerFormat.formatLedgerTime(d) },
         { header: 'Action', cell: (_id, d) => String(d.action ?? '—') },

@@ -181,6 +181,11 @@ type Props = {
   dateFilterField?: 'createdAt' | 'startedAt'
   /** Replaces default helper text under the member UID filter (Firestore sources). */
   memberFilterHelpText?: string
+  /**
+   * When set, rows with a timestamp before this instant (see `dateFilterField`) are hidden
+   * and excluded from export — applied after load, before the optional local date range.
+   */
+  minRowTimestampMs?: number
 }
 
 export function AdminLedgerReport({
@@ -192,6 +197,7 @@ export function AdminLedgerReport({
   exportConfig,
   dateFilterField = 'createdAt',
   memberFilterHelpText,
+  minRowTimestampMs,
 }: Props) {
   const [memberUid, setMemberUid] = useState('')
   const [dateFrom, setDateFrom] = useState('')
@@ -301,15 +307,21 @@ export function AdminLedgerReport({
   const displayRows = useMemo(() => {
     const fromMs = localDayStartMs(dateFrom)
     const toMs = localDayEndMs(dateTo)
-    if (fromMs == null && toMs == null) return rows
+    const lowerCandidates = [minRowTimestampMs, fromMs].filter(
+      (v): v is number => v != null && Number.isFinite(v),
+    )
+    const lowerBound = lowerCandidates.length > 0 ? Math.max(...lowerCandidates) : null
+    const hasAnyBound = lowerBound != null || toMs != null
+    if (!hasAnyBound) return rows
+
     return rows.filter((r) => {
       const ms = ledgerRowTimestampMs(r.data, dateFilterField)
       if (ms == null) return false
-      if (fromMs != null && ms < fromMs) return false
+      if (lowerBound != null && ms < lowerBound) return false
       if (toMs != null && ms > toMs) return false
       return true
     })
-  }, [rows, dateFrom, dateTo, dateFilterField])
+  }, [rows, dateFrom, dateTo, dateFilterField, minRowTimestampMs])
 
   const footerNote = useMemo(() => {
     const dateHint =
@@ -317,8 +329,12 @@ export function AdminLedgerReport({
     const exportHint = exportConfig
       ? ' Use Export to Excel (CSV) for the rows currently shown (UTF-8; opens in Microsoft Excel).'
       : ''
+    const minHint =
+      minRowTimestampMs != null && Number.isFinite(minRowTimestampMs)
+        ? ` Rows before ${new Date(minRowTimestampMs).toISOString().slice(0, 10)} (UTC) are hidden and omitted from export.`
+        : ''
     if (source.kind === 'audit') {
-      return `Up to ${source.maxRows} newest audit rows loaded; balance rows are filtered by action. Use filter to narrow by actor or target user UID.${dateHint}${exportHint}`
+      return `Up to ${source.maxRows} newest audit rows loaded; balance rows are filtered by action. Use filter to narrow by actor or target user UID.${minHint}${dateHint}${exportHint}`
     }
     const memberHint =
       source.kind === 'firestore' &&
@@ -329,8 +345,8 @@ export function AdminLedgerReport({
         : source.enableMemberUidFilter
           ? ' Optional member filter uses Firestore userId equality.'
           : ''
-    return `Up to ${source.maxRows} documents.${memberHint}${dateHint}${exportHint}`
-  }, [source, exportConfig])
+    return `Up to ${source.maxRows} documents.${memberHint}${minHint}${dateHint}${exportHint}`
+  }, [source, exportConfig, minRowTimestampMs])
 
   const displayColumns = useMemo((): LedgerColumn[] => {
     if (!memberProfiles || columns.length === 0) return columns
