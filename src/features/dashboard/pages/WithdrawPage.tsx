@@ -9,6 +9,7 @@ import { useAuthState } from '@/hooks/useAuth'
 import { useSiteSettings } from '@/hooks/useSiteSettings'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
+import { isLiveActivePackage } from '@/lib/activePackagesDisplay'
 import {
   computeMaxWithdrawForPrincipal,
   fmtNextAutoSummary,
@@ -38,8 +39,8 @@ export function WithdrawPage() {
     return onSnapshot(q, (snap) => {
       let mx = 0
       snap.forEach((d) => {
-        const row = d.data()
-        if (String(row.status ?? 'active').toLowerCase() !== 'active') return
+        const row = d.data() as Record<string, unknown>
+        if (!isLiveActivePackage(row)) return
         mx = Math.max(mx, Number(row.amount ?? 0))
       })
       setMaxPrincipal(mx)

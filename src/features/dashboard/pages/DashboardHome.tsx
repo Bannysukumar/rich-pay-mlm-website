@@ -16,6 +16,7 @@ import {
   livePolicyFromSiteSettings,
   mergeWithdrawPolicy,
 } from '@/lib/withdrawPolicy'
+import { isLiveActivePackage } from '@/lib/activePackagesDisplay'
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
@@ -29,6 +30,8 @@ function isNewSchemaPackage(planSnapshot: unknown): boolean {
 
 type PkgIncomeRow = {
   status: string
+  /** True when this row counts toward "Active packages (total)" and live working-cap split. */
+  liveActive: boolean
   amount: number
   nonWorkingPaid: number
   schemaV2: boolean
@@ -55,7 +58,7 @@ function deriveNewSchemaIncomeHud(
   let legacyActiveCap = 0
   for (const p of rows) {
     if (p.schemaV2) nwEarned += p.nonWorkingPaid
-    if (p.status !== 'active') continue
+    if (!p.liveActive) continue
     const capPart = Math.max(0, p.amount) * Math.max(0, p.wMult)
     if (p.schemaV2) newActiveCap += capPart
     else legacyActiveCap += capPart
@@ -189,9 +192,10 @@ export function DashboardHome() {
         const rows: PkgIncomeRow[] = []
         const siteW = Number(settings.workingIncomeCapMultiplier ?? 3)
         snap.forEach((doc) => {
-          const d = doc.data()
+          const d = doc.data() as Record<string, unknown>
           const status = String(d.status ?? 'active').toLowerCase()
-          if (status === 'active') {
+          const liveActive = isLiveActivePackage(d)
+          if (liveActive) {
             const amt = Number(d.amount ?? 0)
             sum += amt
             maxOne = Math.max(maxOne, amt)
@@ -204,6 +208,7 @@ export function DashboardHome() {
           )
           rows.push({
             status,
+            liveActive,
             amount: Number(d.amount ?? 0),
             nonWorkingPaid: Number(d.nonWorkingPaid ?? 0),
             schemaV2,
