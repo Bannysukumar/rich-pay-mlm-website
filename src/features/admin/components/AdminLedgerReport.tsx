@@ -153,6 +153,12 @@ type FirestoreSource = {
   orderDescWhenUnscoped: boolean
   maxRows: number
   enableMemberUidFilter?: boolean
+  /**
+   * When `enableMemberUidFilter` is true and the admin enters a UID, the default is Firestore `where('userId','==', uid)`.
+   * If this array is non-empty, instead loads the latest `maxRows` documents and keeps rows where **any** listed field
+   * equals the trimmed filter (exact match). Use for ledgers with multiple parties (e.g. peer transfers).
+   */
+  memberUidClientFields?: string[]
 }
 
 type AuditSource = {
@@ -173,6 +179,8 @@ type Props = {
   exportConfig?: LedgerExportConfig
   /** Field used for optional date range filter (default `createdAt`). Use `startedAt` for package rows. */
   dateFilterField?: 'createdAt' | 'startedAt'
+  /** Replaces default helper text under the member UID filter (Firestore sources). */
+  memberFilterHelpText?: string
 }
 
 export function AdminLedgerReport({
@@ -183,6 +191,7 @@ export function AdminLedgerReport({
   memberProfiles,
   exportConfig,
   dateFilterField = 'createdAt',
+  memberFilterHelpText,
 }: Props) {
   const [memberUid, setMemberUid] = useState('')
   const [dateFrom, setDateFrom] = useState('')
@@ -247,7 +256,15 @@ export function AdminLedgerReport({
 
     const s = source
     const constraints: QueryConstraint[] = []
-    if (memberTrim && s.enableMemberUidFilter) {
+    const clientMemberFields =
+      Array.isArray(s.memberUidClientFields) && s.memberUidClientFields.length > 0
+        ? s.memberUidClientFields
+        : null
+    const useClientMemberFilter = Boolean(
+      memberTrim && s.enableMemberUidFilter && clientMemberFields && clientMemberFields.length > 0,
+    )
+
+    if (memberTrim && s.enableMemberUidFilter && !useClientMemberFilter) {
       constraints.push(where('userId', '==', memberTrim))
       constraints.push(orderBy(s.orderField, 'asc'))
     } else {
@@ -259,8 +276,14 @@ export function AdminLedgerReport({
       qRef,
       (snap) => {
         let list = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }))
-        if (memberTrim && s.enableMemberUidFilter) {
+        if (memberTrim && s.enableMemberUidFilter && !useClientMemberFilter) {
           list = [...list].reverse()
+        }
+        if (useClientMemberFilter && clientMemberFields) {
+          const key = memberTrim
+          list = list.filter((r) =>
+            clientMemberFields.some((f) => String(r.data[f] ?? '').trim() === key),
+          )
         }
         setRows(list)
         void refreshProfiles(list)
@@ -297,7 +320,16 @@ export function AdminLedgerReport({
     if (source.kind === 'audit') {
       return `Up to ${source.maxRows} newest audit rows loaded; balance rows are filtered by action. Use filter to narrow by actor or target user UID.${dateHint}${exportHint}`
     }
-    return `Up to ${source.maxRows} documents. ${source.enableMemberUidFilter ? 'Optional member filter uses Firestore userId equality.' : ''}${dateHint}${exportHint}`
+    const memberHint =
+      source.kind === 'firestore' &&
+      source.enableMemberUidFilter &&
+      source.memberUidClientFields &&
+      source.memberUidClientFields.length > 0
+        ? ' Optional member filter matches sender or recipient UID within loaded rows.'
+        : source.enableMemberUidFilter
+          ? ' Optional member filter uses Firestore userId equality.'
+          : ''
+    return `Up to ${source.maxRows} documents.${memberHint}${dateHint}${exportHint}`
   }, [source, exportConfig])
 
   const displayColumns = useMemo((): LedgerColumn[] => {
@@ -441,9 +473,15 @@ export function AdminLedgerReport({
               autoComplete="off"
             />
             <p className="text-[11px] text-zinc-600">
-              {source.kind === 'audit'
-                ? 'Matches target userId inside adjustment detail, row id, or actor UID substring.'
-                : 'Restricts the query to documents where userId equals this value.'}
+              {memberFilterHelpText ??
+                (source.kind === 'audit'
+                  ? 'Matches target userId inside adjustment detail, row id, or actor UID substring.'
+                  : source.kind === 'firestore' &&
+                      source.enableMemberUidFilter &&
+                      source.memberUidClientFields &&
+                      source.memberUidClientFields.length > 0
+                    ? 'Exact Firebase Auth UID: keeps rows where the sender (userId) or recipient (recipientUid) matches, within the loaded window.'
+                    : 'Restricts the query to documents where userId equals this value.')}
             </p>
           </Card>
         )}

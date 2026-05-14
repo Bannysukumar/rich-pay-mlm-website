@@ -18,6 +18,7 @@ import { AdminQrPage } from '@/features/admin/pages/AdminQrPage'
 import { AdminRegistrationsTodayPage } from '@/features/admin/pages/AdminRegistrationsTodayPage'
 import { AdminRanksPage } from '@/features/admin/pages/AdminRanksPage'
 import { AdminReportActivePackagesPage } from '@/features/admin/pages/AdminReportActivePackagesPage'
+import { AdminReportPeerTransfersPage } from '@/features/admin/pages/AdminReportPeerTransfersPage'
 import { AdminReportBalanceAdjustmentsPage } from '@/features/admin/pages/AdminReportBalanceAdjustmentsPage'
 import { AdminReportDailyRoiPage } from '@/features/admin/pages/AdminReportDailyRoiPage'
 import { AdminReportRankBonusPage } from '@/features/admin/pages/AdminReportRankBonusPage'
@@ -207,6 +208,7 @@ export function AppRouter() {
         <Route path="reports/income-team-level" element={<AdminReportTeamLevelIncomePage />} />
         <Route path="reports/income-rank" element={<AdminReportRankBonusPage />} />
         <Route path="reports/active-packages" element={<AdminReportActivePackagesPage />} />
+        <Route path="reports/peer-transfers" element={<AdminReportPeerTransfersPage />} />
         <Route path="audit" element={<AdminAuditPage />} />
         <Route path="maintenance" element={<AdminMaintenancePage />} />
       </Route>

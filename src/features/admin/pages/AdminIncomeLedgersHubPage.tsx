@@ -33,6 +33,11 @@ const LINKS: { to: string; label: string; hint: string }[] = [
     label: 'Packages & ROI pause',
     hint: 'Package status and admin ROI pause.',
   },
+  {
+    to: '/admin/reports/peer-transfers',
+    label: 'Member peer transfers',
+    hint: 'Activation wallet transfers between members; export to Excel.',
+  },
 ]
 
 export function AdminIncomeLedgersHubPage() {

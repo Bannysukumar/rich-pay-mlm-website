@@ -71,6 +71,7 @@ const groups: { title: string; items: NavItem[] }[] = [
       { to: '/admin/reports/income-team-level', label: 'Team level income', icon: IconHierarchy },
       { to: '/admin/reports/income-rank', label: 'Rank bonus payouts', icon: IconAward },
       { to: '/admin/reports/active-packages', label: 'Packages & ROI pause', icon: IconClipboardList },
+      { to: '/admin/reports/peer-transfers', label: 'Member peer transfers', icon: IconTransfer },
     ],
   },
   {

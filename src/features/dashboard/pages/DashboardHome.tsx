@@ -21,6 +21,63 @@ function fmt(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
 }
 
+/** Activations with immutable `planSnapshot` schema v2 (post–compensation-freeze flow). Legacy packages are excluded. */
+function isNewSchemaPackage(planSnapshot: unknown): boolean {
+  if (!planSnapshot || typeof planSnapshot !== 'object') return false
+  return Number((planSnapshot as Record<string, unknown>).schemaVersion) === 2
+}
+
+type PkgIncomeRow = {
+  status: string
+  amount: number
+  nonWorkingPaid: number
+  schemaV2: boolean
+  wMult: number
+}
+
+function fmtCapMult(m: number): string {
+  if (!Number.isFinite(m) || m <= 0) return '?'
+  if (Math.abs(m - Math.round(m)) < 1e-6) return String(Math.round(m))
+  return String(m)
+}
+
+/**
+ * Non-working earned: sum of `nonWorkingPaid` on v2 snapshot packages only (any status).
+ * Working earned: `totalWorkingIncome` when every active stake is v2; if only legacy stakes are active, 0;
+ * if mixed active stakes, allocate by working-cap weight (principal × frozen working mult).
+ */
+function deriveNewSchemaIncomeHud(
+  rows: PkgIncomeRow[],
+  totalWorkingIncome: number,
+): { nwEarned: number; wValue: number; showWorkingSplitNote: boolean } {
+  let nwEarned = 0
+  let newActiveCap = 0
+  let legacyActiveCap = 0
+  for (const p of rows) {
+    if (p.schemaV2) nwEarned += p.nonWorkingPaid
+    if (p.status !== 'active') continue
+    const capPart = Math.max(0, p.amount) * Math.max(0, p.wMult)
+    if (p.schemaV2) newActiveCap += capPart
+    else legacyActiveCap += capPart
+  }
+  const totalActiveCap = newActiveCap + legacyActiveCap
+  const tw = Math.max(0, Number(totalWorkingIncome) || 0)
+  if (totalActiveCap <= 1e-9) {
+    return { nwEarned, wValue: tw, showWorkingSplitNote: false }
+  }
+  if (newActiveCap <= 1e-9) {
+    return { nwEarned, wValue: 0, showWorkingSplitNote: false }
+  }
+  if (legacyActiveCap <= 1e-9) {
+    return { nwEarned, wValue: tw, showWorkingSplitNote: false }
+  }
+  return {
+    nwEarned,
+    wValue: tw * (newActiveCap / totalActiveCap),
+    showWorkingSplitNote: true,
+  }
+}
+
 function normalizePowerRest(pRaw: number, rRaw: number): { p: number; r: number } {
   let p = Math.max(0, pRaw)
   let r = Math.max(0, rRaw)
@@ -104,6 +161,7 @@ export function DashboardHome() {
   const { settings } = useSiteSettings()
   const [activePackageTotal, setActivePackageTotal] = useState<number | undefined>(undefined)
   const [maxActivePrincipal, setMaxActivePrincipal] = useState<number | undefined>(undefined)
+  const [pkgIncomeRows, setPkgIncomeRows] = useState<PkgIncomeRow[]>([])
 
   const refLink = useMemo(() => {
     if (!profile?.username) return ''
@@ -115,6 +173,7 @@ export function DashboardHome() {
     if (!firebaseUid) {
       setActivePackageTotal(undefined)
       setMaxActivePrincipal(undefined)
+      setPkgIncomeRows([])
       return
     }
     const q = query(
@@ -127,24 +186,42 @@ export function DashboardHome() {
       (snap) => {
         let sum = 0
         let maxOne = 0
+        const rows: PkgIncomeRow[] = []
+        const siteW = Number(settings.workingIncomeCapMultiplier ?? 3)
         snap.forEach((doc) => {
           const d = doc.data()
-          if (String(d.status ?? 'active').toLowerCase() === 'active') {
+          const status = String(d.status ?? 'active').toLowerCase()
+          if (status === 'active') {
             const amt = Number(d.amount ?? 0)
             sum += amt
             maxOne = Math.max(maxOne, amt)
           }
+          const ps = d.planSnapshot as Record<string, unknown> | undefined
+          const schemaV2 = isNewSchemaPackage(ps)
+          const wMult = Number(
+            d.frozenWorkingCapMultiplier ??
+              (ps != null && ps.workingIncomeCapMultiplier != null ? Number(ps.workingIncomeCapMultiplier) : siteW),
+          )
+          rows.push({
+            status,
+            amount: Number(d.amount ?? 0),
+            nonWorkingPaid: Number(d.nonWorkingPaid ?? 0),
+            schemaV2,
+            wMult: Number.isFinite(wMult) && wMult > 0 ? wMult : siteW,
+          })
         })
         setActivePackageTotal(sum)
         setMaxActivePrincipal(maxOne)
+        setPkgIncomeRows(rows)
       },
       () => {
         setActivePackageTotal(0)
         setMaxActivePrincipal(0)
+        setPkgIncomeRows([])
         toast.error('Could not load active package total')
       },
     )
-  }, [firebaseUid])
+  }, [firebaseUid, settings.nonWorkingIncomeCapMultiplier, settings.workingIncomeCapMultiplier])
 
   const withdrawalPolicyMerged = useMemo(
     () =>
@@ -173,6 +250,12 @@ export function DashboardHome() {
       settings.rankQualificationRestPercent,
     )
   }, [profile, settings.rankQualificationPowerPercent, settings.rankQualificationRestPercent])
+
+  const newSchemaIncomeHud = useMemo(
+    () =>
+      deriveNewSchemaIncomeHud(pkgIncomeRows, profile?.totalWorkingIncome ?? 0),
+    [pkgIncomeRows, profile?.totalWorkingIncome],
+  )
 
   const copy = async () => {
     if (!refLink) return
@@ -366,6 +449,37 @@ export function DashboardHome() {
       </div>
 
       <StatGrid items={row1} />
+
+      <div className="row g-3 mt-2">
+        <div className="col-md-6 col-sm-12">
+          <div className="ki-eshop-card">
+            <div className="ki-eshop-icon mx-auto text-white bg-primary" style={{ opacity: 0.92 }}>
+              <span className="small fw-bold">$</span>
+            </div>
+            <h3 className="text-primary">{`$ ${fmt(newSchemaIncomeHud.nwEarned)}`}</h3>
+            <p className="mg-b-35 f-w-600 txt-ellipsis-1">
+              {`Non Working (${fmtCapMult(Number(settings.nonWorkingIncomeCapMultiplier ?? 2))}×) — earned`}
+            </p>
+          </div>
+        </div>
+        <div className="col-md-6 col-sm-12">
+          <div className="ki-eshop-card">
+            <div className="ki-eshop-icon mx-auto text-white bg-danger" style={{ opacity: 0.92 }}>
+              <span className="small fw-bold">$</span>
+            </div>
+            <h3 className="text-danger">{`$ ${fmt(newSchemaIncomeHud.wValue)}`}</h3>
+            <p className="mg-b-35 f-w-600 txt-ellipsis-1">
+              {`Working (${fmtCapMult(Number(settings.workingIncomeCapMultiplier ?? 3))}×) — earned`}
+            </p>
+            {newSchemaIncomeHud.showWorkingSplitNote ? (
+              <p className="small mb-0" style={{ color: '#888' }}>
+                Share estimated from your active stakes while legacy and new plans overlap.
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
       <div className="row mt-3 mb-2">
         <div className="col-12">
           <div className="alert alert-secondary border mb-0" style={{ borderColor: 'rgba(212,175,55,0.25)' }}>
