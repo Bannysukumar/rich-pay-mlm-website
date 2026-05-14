@@ -299,21 +299,69 @@ function normalizePowerRestPercent(pRaw: number, rRaw: number): { p: number; r: 
   return { p: (p / s) * 100, r: (r / s) * 100 }
 }
 
+function teamLevelDocTimeMs(x: Record<string, unknown>): number {
+  const u = x.updatedAt
+  if (u != null && typeof (u as { toMillis?: () => number }).toMillis === 'function') {
+    return (u as { toMillis: () => number }).toMillis()
+  }
+  if (typeof u === 'number' && Number.isFinite(u)) return u
+  const c = x.createdAt
+  if (c != null && typeof (c as { toMillis?: () => number }).toMillis === 'function') {
+    return (c as { toMillis: () => number }).toMillis()
+  }
+  if (typeof c === 'number' && Number.isFinite(c)) return c
+  return 0
+}
+
+/** Reference seed doc ids (`seed_lvl_N`) — used only to break ties when two active rows share the same level. */
+function isSeedTeamLevelDocId(id: string): boolean {
+  return /^seed_lvl_\d+$/i.test(id)
+}
+
+type TeamLevelPick = { id: string; ts: number; data: Record<string, unknown> }
+
+function betterTeamLevelDoc(a: TeamLevelPick, b: TeamLevelPick): TeamLevelPick {
+  if (b.ts > a.ts) return b
+  if (b.ts < a.ts) return a
+  if (isSeedTeamLevelDocId(a.id) && !isSeedTeamLevelDocId(b.id)) return b
+  if (!isSeedTeamLevelDocId(a.id) && isSeedTeamLevelDocId(b.id)) return a
+  return b.id >= a.id ? b : a
+}
+
+function frozenRowFromTeamLevelData(lvl: number, x: Record<string, unknown>): FrozenTeamRow {
+  const desc = x.conditionDescription != null ? String(x.conditionDescription).trim() : ''
+  return {
+    level: lvl,
+    percent: Number(x.percent ?? 0),
+    requiredDirects: Number(x.requiredDirects ?? x.directs ?? 0),
+    ...(desc ? { conditionDescription: desc } : {}),
+  }
+}
+
+/**
+ * Snapshot team matrix at activation. If multiple **active** rows share the same `level` (duplicate
+ * configs), pick the one with the latest `updatedAt`/`createdAt` so admin edits win over stale rows.
+ */
 async function freezeTeamLevelsForActivation(maxLevels: number): Promise<FrozenTeamRow[]> {
   const cap = Math.min(100, Math.max(1, maxLevels))
   const snap = await db.collection(COL_TEAM_LEVELS).where('active', '==', true).get()
-  const byLevel = new Map<number, FrozenTeamRow>()
+  const winners = new Map<number, TeamLevelPick>()
   for (const d of snap.docs) {
-    const x = d.data()
+    const x = d.data() as Record<string, unknown>
     const lvl = Number(x.level ?? 0)
     if (!Number.isFinite(lvl) || lvl < 1) continue
-    const desc = x.conditionDescription != null ? String(x.conditionDescription).trim() : ''
-    byLevel.set(lvl, {
-      level: lvl,
-      percent: Number(x.percent ?? 0),
-      requiredDirects: Number(x.requiredDirects ?? x.directs ?? 0),
-      ...(desc ? { conditionDescription: desc } : {}),
-    })
+    const ts = teamLevelDocTimeMs(x)
+    const cand: TeamLevelPick = { id: d.id, ts, data: x }
+    const cur = winners.get(lvl)
+    if (!cur) {
+      winners.set(lvl, cand)
+      continue
+    }
+    winners.set(lvl, betterTeamLevelDoc(cur, cand))
+  }
+  const byLevel = new Map<number, FrozenTeamRow>()
+  for (const [lvl, pick] of winners) {
+    byLevel.set(lvl, frozenRowFromTeamLevelData(lvl, pick.data))
   }
   return Array.from({ length: cap }, (_, i) => {
     const L = i + 1

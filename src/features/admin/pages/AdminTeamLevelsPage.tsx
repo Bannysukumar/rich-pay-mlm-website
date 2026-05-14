@@ -9,7 +9,7 @@ import {
   serverTimestamp,
   updateDoc,
 } from 'firebase/firestore'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
 import { Button } from '@/components/ui/Button'
 import { Input, Label } from '@/components/ui/Input'
@@ -218,14 +218,37 @@ export function AdminTeamLevelsPage() {
     }
   }
 
+  const duplicateActiveLevels = useMemo(() => {
+    const by = new Map<number, number>()
+    for (const r of rows) {
+      if (!r.active) continue
+      by.set(r.level, (by.get(r.level) ?? 0) + 1)
+    }
+    return [...by.entries()]
+      .filter(([, n]) => n > 1)
+      .map(([lvl]) => lvl)
+      .sort((a, b) => a - b)
+  }, [rows])
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-xl font-bold text-[#e4e4e7] sm:text-2xl">Team Level Settings</h1>
         <p className="text-sm text-[#9898a8]">
           Commission matrix for team-level bonuses. Use <strong>Edit</strong> → <strong>Update</strong> on each row or add
-          new levels below.
+          new levels below. New package activations snapshot the active matrix from Firestore at purchase time.
         </p>
+        {duplicateActiveLevels.length > 0 ? (
+          <div
+            className="mt-3 rounded-lg border border-amber-600/50 bg-amber-950/30 px-3 py-2 text-xs text-amber-100/95"
+            role="status"
+          >
+            <strong className="font-semibold">Duplicate active levels:</strong> levels{' '}
+            {duplicateActiveLevels.join(', ')} each have more than one active row. Cloud Functions now pick the
+            most recently updated row per level for new activations; deactivate or delete extras so only one active row
+            per level remains.
+          </div>
+        ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
