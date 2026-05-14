@@ -4,6 +4,20 @@ import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { auth, db } from '@/lib/firebase'
 import { COLLECTIONS } from '@/lib/constants'
+import type { WithdrawStatus } from '@/types/models'
+
+const WITHDRAW_STATUSES = new Set<WithdrawStatus>([
+  'pending',
+  'processing',
+  'approved',
+  'rejected',
+  'paid',
+])
+
+function normalizeWithdrawStatus(raw: unknown): WithdrawStatus {
+  const s = String(raw ?? 'pending').toLowerCase()
+  return WITHDRAW_STATUSES.has(s as WithdrawStatus) ? (s as WithdrawStatus) : 'pending'
+}
 
 export type WithdrawalRow = {
   id: string
@@ -11,6 +25,7 @@ export type WithdrawalRow = {
   amount: number
   address: string
   txHash: string
+  status: WithdrawStatus
 }
 
 function pickTxHash(d: Record<string, unknown>): string {
@@ -29,6 +44,7 @@ function mapWithdrawalDoc(docSnap: { id: string; data: () => Record<string, unkn
     amount: Number(d.amountGross ?? d.amount ?? 0),
     address: String(d.address ?? ''),
     txHash: pickTxHash(d),
+    status: normalizeWithdrawStatus(d.status),
   }
 }
 

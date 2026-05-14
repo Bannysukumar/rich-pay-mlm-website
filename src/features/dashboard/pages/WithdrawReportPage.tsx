@@ -1,4 +1,5 @@
 import { useUserWithdrawalsList } from '@/hooks/useUserWithdrawalsList'
+import type { WithdrawStatus } from '@/types/models'
 
 function fmtWithdrawDate(ms: number) {
   if (!ms) return '—'
@@ -24,6 +25,40 @@ const BSCSCAN_TX = 'https://bscscan.com/tx/'
 
 const WITHDRAWALS_LOAD_ERROR = 'Could not load withdrawals.'
 
+function statusLabel(s: WithdrawStatus): string {
+  switch (s) {
+    case 'pending':
+      return 'Pending'
+    case 'processing':
+      return 'Processing'
+    case 'approved':
+      return 'Approved'
+    case 'rejected':
+      return 'Rejected'
+    case 'paid':
+      return 'Paid'
+    default:
+      return String(s)
+  }
+}
+
+function statusClass(s: WithdrawStatus): string {
+  switch (s) {
+    case 'pending':
+      return 'text-warning'
+    case 'processing':
+      return 'text-info'
+    case 'approved':
+      return 'text-primary'
+    case 'rejected':
+      return 'text-danger'
+    case 'paid':
+      return 'text-success'
+    default:
+      return 'text-secondary'
+  }
+}
+
 export function WithdrawReportPage() {
   const { rows, loading } = useUserWithdrawalsList(WITHDRAWALS_LOAD_ERROR)
 
@@ -43,6 +78,7 @@ export function WithdrawReportPage() {
                       <tr>
                         <th>Serial </th>
                         <th>Date </th>
+                        <th>Status</th>
                         <th>Amount</th>
                         <th>Address</th>
                         <th>TxHash</th>
@@ -51,13 +87,13 @@ export function WithdrawReportPage() {
                     <tbody>
                       {loading ? (
                         <tr>
-                          <td colSpan={5} className="text-secondary">
+                          <td colSpan={6} className="text-secondary">
                             Loading…
                           </td>
                         </tr>
                       ) : rows.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="text-secondary">
+                          <td colSpan={6} className="text-secondary">
                             No withdrawals yet.
                           </td>
                         </tr>
@@ -66,6 +102,7 @@ export function WithdrawReportPage() {
                           <tr key={r.id}>
                             <td className=" ">{i + 1}</td>
                             <td className=" ">{fmtWithdrawDate(r.createdAtMs)}</td>
+                            <td className={`fw-semibold ${statusClass(r.status)}`}>{statusLabel(r.status)}</td>
                             <td className=" ">{fmtAmount(r.amount)}</td>
                             <td className=" ">{r.address || '—'}</td>
                             <td className=" ">
