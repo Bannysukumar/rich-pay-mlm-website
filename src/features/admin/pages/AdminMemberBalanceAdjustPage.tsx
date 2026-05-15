@@ -12,7 +12,15 @@ import {
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 
-type ResolvedMember = { uid: string; username: string; email: string }
+type ResolvedMember = { uid: string; username: string; email: string; fullName: string }
+
+function mapProfileBasics(d: Record<string, unknown>) {
+  return {
+    fullName: String(d.fullName ?? '').trim(),
+    username: String(d.username ?? '').trim(),
+    email: String(d.email ?? '').trim(),
+  }
+}
 
 type BalanceSnapshot = {
   wallets: { deposit: number; activation: number; cash: number }
@@ -48,6 +56,7 @@ export function AdminMemberBalanceAdjustPage() {
   const [resolved, setResolved] = useState<ResolvedMember | null>(null)
   const [balances, setBalances] = useState<BalanceSnapshot | null>(null)
   const [resolving, setResolving] = useState(false)
+  const [adjusting, setAdjusting] = useState(false)
 
   const resolveMember = useCallback(async () => {
     const raw = lookup.trim()
@@ -67,17 +76,25 @@ export function AdminMemberBalanceAdjustPage() {
           return
         }
         const uSnap = await getDoc(doc(db, COLLECTIONS.users, uid))
-        const username = uSnap.exists() ? String(uSnap.data()?.username ?? key) : key
-        const email = uSnap.exists() ? String(uSnap.data()?.email ?? '') : ''
-        setResolved({ uid, username, email })
+        const p = uSnap.exists() ? mapProfileBasics(uSnap.data() as Record<string, unknown>) : { fullName: '', username: key, email: '' }
+        setResolved({
+          uid,
+          username: p.username || key,
+          email: p.email,
+          fullName: p.fullName,
+        })
         toast.success('Member loaded')
         return
       }
       const uSnap = await getDoc(doc(db, COLLECTIONS.users, raw))
       if (uSnap.exists()) {
-        const username = String(uSnap.data()?.username ?? raw)
-        const email = String(uSnap.data()?.email ?? '')
-        setResolved({ uid: raw, username, email })
+        const p = mapProfileBasics(uSnap.data() as Record<string, unknown>)
+        setResolved({
+          uid: raw,
+          username: p.username || raw,
+          email: p.email,
+          fullName: p.fullName,
+        })
         toast.success('Member loaded')
         return
       }
@@ -104,7 +121,18 @@ export function AdminMemberBalanceAdjustPage() {
           setBalances(null)
           return
         }
-        setBalances(mapBalances(snap.data() as Record<string, unknown>))
+        const data = snap.data() as Record<string, unknown>
+        setBalances(mapBalances(data))
+        setResolved((prev) => {
+          if (!prev || prev.uid !== snap.id) return prev
+          const p = mapProfileBasics(data)
+          return {
+            ...prev,
+            fullName: p.fullName,
+            username: p.username || prev.username,
+            email: p.email || prev.email,
+          }
+        })
       },
       () => {
         toast.error('Could not subscribe to member profile')
@@ -114,8 +142,10 @@ export function AdminMemberBalanceAdjustPage() {
 
   const walletDelta = async (e: FormEvent) => {
     e.preventDefault()
+    /** Capture before any `await` — synthetic events are pooled; `currentTarget` is null after async. */
+    const form = e.currentTarget as HTMLFormElement
     if (!resolved) return
-    const fd = new FormData(e.currentTarget as HTMLFormElement)
+    const fd = new FormData(form)
     const field = String(fd.get('wallet') || '') as AdminAdjustMemberBalanceField
     const raw = Number(fd.get('delta') || 0)
     const allowed: AdminAdjustMemberBalanceField[] = [
@@ -134,13 +164,31 @@ export function AdminMemberBalanceAdjustPage() {
       toast.error('Pick a balance field and a non-zero delta')
       return
     }
+    setAdjusting(true)
     try {
       await adminAdjustMemberBalancesCallable({ userId: resolved.uid, field, delta: raw })
       await pushAuditLog('adminWalletAdjust', { userId: resolved.uid, field, delta: raw })
       toast.success('Balance adjusted')
-      ;(e.currentTarget as HTMLFormElement).reset()
-    } catch {
-      toast.error('Could not adjust balance (check permissions, delta, and deploy functions)')
+      form.reset()
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message?: string }).message || '')
+          : ''
+      const code = err && typeof err === 'object' && 'code' in err ? String((err as { code?: string }).code || '') : ''
+      if (msg.includes('failed-precondition') || code.includes('failed-precondition')) {
+        toast.error('That change would make a balance negative — use a smaller delta.')
+      } else if (code.includes('permission-denied') || msg.includes('permission-denied')) {
+        toast.error('Permission denied — sign in as an admin with access to this action.')
+      } else if (code.includes('unauthenticated') || msg.includes('unauthenticated')) {
+        toast.error('Session expired — sign in again.')
+      } else if (msg) {
+        toast.error(msg)
+      } else {
+        toast.error('Could not adjust balance (check permissions, delta, and deploy functions).')
+      }
+    } finally {
+      setAdjusting(false)
     }
   }
 
@@ -172,17 +220,26 @@ export function AdminMemberBalanceAdjustPage() {
         </div>
 
         {resolved ? (
-          <div className="rounded-md border border-[rgba(212,175,55,0.15)] bg-[rgba(0,0,0,0.15)] px-3 py-2 text-[12px] text-[#c4c4ce]">
-            <span className="font-mono font-semibold text-[#f5e6a8]">{resolved.username}</span>
-            <span className="mx-2 text-[#6b6b7c]">·</span>
-            <span className="font-mono text-[10px] text-[#9898a8]" title={resolved.uid}>
-              UID {resolved.uid.length > 18 ? `${resolved.uid.slice(0, 18)}…` : resolved.uid}
-            </span>
+          <div className="space-y-2 rounded-md border border-[rgba(212,175,55,0.15)] bg-[rgba(0,0,0,0.15)] px-3 py-3 text-[12px] text-[#c4c4ce]">
+            <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+              <span className="shrink-0 font-medium text-[#6b6b7c]">Name</span>
+              <span className="min-w-0 text-[#e4e4e7]">{resolved.fullName || '—'}</span>
+            </div>
+            <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+              <span className="shrink-0 font-medium text-[#6b6b7c]">Username</span>
+              <span className="font-mono font-semibold text-[#f5e6a8]">{resolved.username}</span>
+            </div>
+            <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+              <span className="shrink-0 font-medium text-[#6b6b7c]">UID</span>
+              <span className="font-mono text-[10px] text-[#9898a8]" title={resolved.uid}>
+                {resolved.uid.length > 22 ? `${resolved.uid.slice(0, 22)}…` : resolved.uid}
+              </span>
+            </div>
             {resolved.email ? (
-              <>
-                <span className="mx-2 text-[#6b6b7c]">·</span>
-                <span className="break-all text-[11px]">{resolved.email}</span>
-              </>
+              <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                <span className="shrink-0 font-medium text-[#6b6b7c]">Email</span>
+                <span className="break-all text-[11px] text-[#c4c4ce]">{resolved.email}</span>
+              </div>
             ) : null}
           </div>
         ) : null}
@@ -224,8 +281,8 @@ export function AdminMemberBalanceAdjustPage() {
               <option value="rankCommissionTotal">Rank bonus (cumulative)</option>
             </select>
             <Input name="delta" type="number" step="0.01" placeholder="e.g. 25 or -10" />
-            <Button type="submit" variant="outline">
-              Apply delta
+            <Button type="submit" variant="outline" disabled={adjusting}>
+              {adjusting ? 'Applying…' : 'Apply delta'}
             </Button>
             <p className="text-[10px] text-[#6b6b7c]">
               Server-validated; cannot drive a balance negative. Deploy{' '}
