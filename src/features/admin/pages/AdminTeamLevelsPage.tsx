@@ -18,7 +18,7 @@ import { Input, Label } from '@/components/ui/Input'
 import { bumpPlanSettingsVersion } from '@/lib/admin/bumpPlanSettingsVersion'
 import { pushAuditLog } from '@/lib/admin/pushAuditLog'
 import { getHttpsCallable } from '@/lib/api/httpsCallableHelper'
-import { COLLECTIONS } from '@/lib/constants'
+import { COLLECTIONS, DEFAULT_UPLINE_DURATION_CAP_PERCENT } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 import { cn } from '@/lib/utils/cn'
 
@@ -26,6 +26,8 @@ type LvlRow = {
   id: string
   level: number
   percent: number
+  /** 0–100: upline earns this level for first (plan duration days × this / 100) days after downline activation. */
+  uplineDurationCapPercent: number
   requiredDirects: number
   conditionDescription: string
   active: boolean
@@ -37,6 +39,12 @@ type LvlRow = {
  * deterministically — new activations can still look "stuck" on an old %. After saving the row
  * the admin intends as canonical, turn off other active rows for that level.
  */
+function clampUplineDurationCapPercent(v: unknown): number {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return DEFAULT_UPLINE_DURATION_CAP_PERCENT
+  return Math.max(0, Math.min(100, n))
+}
+
 async function deactivateOtherActiveSameLevel(keepDocId: string, level: number) {
   if (!Number.isFinite(level) || level < 1) return
   const q = query(
@@ -117,6 +125,7 @@ export function AdminTeamLevelsPage() {
   const [draft, setDraft] = useState({
     level: 1,
     percent: 0,
+    uplineDurationCapPercent: DEFAULT_UPLINE_DURATION_CAP_PERCENT,
     requiredDirects: 0,
     conditionDescription: '',
     active: true,
@@ -126,6 +135,7 @@ export function AdminTeamLevelsPage() {
     fromLvl: 1,
     toLvl: 30,
     percent: 3,
+    uplineDurationCapPercent: DEFAULT_UPLINE_DURATION_CAP_PERCENT,
     requiredDirects: 6,
     conditionDescription: 'At least 6 active direct referrals',
   })
@@ -134,6 +144,7 @@ export function AdminTeamLevelsPage() {
   const [editForm, setEditForm] = useState({
     level: 0,
     percent: 0,
+    uplineDurationCapPercent: DEFAULT_UPLINE_DURATION_CAP_PERCENT,
     requiredDirects: 0,
     conditionDescription: '',
     active: true,
@@ -149,6 +160,9 @@ export function AdminTeamLevelsPage() {
           id: d.id,
           level: Number(x.level ?? 0),
           percent: Number(x.percent ?? 0),
+          uplineDurationCapPercent: clampUplineDurationCapPercent(
+            x.uplineDurationCapPercent ?? DEFAULT_UPLINE_DURATION_CAP_PERCENT,
+          ),
           requiredDirects: Number(x.requiredDirects ?? x.directs ?? 0),
           conditionDescription: String(x.conditionDescription ?? '').trim(),
           active: Boolean(x.active),
@@ -165,6 +179,7 @@ export function AdminTeamLevelsPage() {
     setEditForm({
       level: r.level,
       percent: r.percent,
+      uplineDurationCapPercent: r.uplineDurationCapPercent,
       requiredDirects: r.requiredDirects,
       conditionDescription: r.conditionDescription,
       active: r.active,
@@ -182,6 +197,7 @@ export function AdminTeamLevelsPage() {
       await updateDoc(doc(db, COLLECTIONS.teamLevels, editingId), {
         level: editForm.level,
         percent: editForm.percent,
+        uplineDurationCapPercent: clampUplineDurationCapPercent(editForm.uplineDurationCapPercent),
         requiredDirects: editForm.requiredDirects,
         conditionDescription: editForm.conditionDescription.trim(),
         active: editForm.active,
@@ -204,6 +220,7 @@ export function AdminTeamLevelsPage() {
     try {
       const ref = await addDoc(collection(db, COLLECTIONS.teamLevels), {
         ...draft,
+        uplineDurationCapPercent: clampUplineDurationCapPercent(draft.uplineDurationCapPercent),
         conditionDescription: draft.conditionDescription.trim(),
         updatedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
@@ -245,6 +262,7 @@ export function AdminTeamLevelsPage() {
       for (const r of targets) {
         await updateDoc(doc(db, COLLECTIONS.teamLevels, r.id), {
           percent: bulk.percent,
+          uplineDurationCapPercent: clampUplineDurationCapPercent(bulk.uplineDurationCapPercent),
           requiredDirects: bulk.requiredDirects,
           conditionDescription: bulk.conditionDescription.trim(),
           updatedAt: serverTimestamp(),
@@ -295,8 +313,11 @@ export function AdminTeamLevelsPage() {
       <div>
         <h1 className="text-xl font-bold text-[#e4e4e7] sm:text-2xl">Team Level Settings</h1>
         <p className="text-sm text-[#9898a8]">
-          Commission matrix for team-level bonuses. Use <strong>Edit</strong> → <strong>Update</strong> on each row or add
-          new levels below. New package activations snapshot the active matrix from Firestore at purchase time.
+          Commission matrix for team-level bonuses. <strong>Upline duration %</strong> limits how long (as a share of
+          the <em>downline plan length in days</em>) each level pays from that downline’s daily ROI — e.g. 50 (the default)
+          on a 200-day plan pays for 100 days after activation, then stops for that package. Use <strong>Edit</strong> →{' '}
+          <strong>Update</strong> on each row or add new levels below. New activations snapshot the active matrix from
+          Firestore at purchase time.
         </p>
         {duplicateActiveLevels.length > 0 ? (
           <div
@@ -325,9 +346,10 @@ export function AdminTeamLevelsPage() {
       <div className="admin-panel-sheet space-y-3 p-4">
         <h2 className="text-sm font-semibold text-[#e4e4e7]">Bulk update by level range</h2>
         <p className="text-xs text-[#9898a8]">
-          Applies %, required active directs, and condition text to every saved row whose level index falls in the range.
+          Applies %, upline duration %, required active directs, and condition text to every saved row whose level index
+          falls in the range.
         </p>
-        <div className="grid gap-3 md:grid-cols-6">
+        <div className="grid gap-3 md:grid-cols-7">
           <div>
             <Label>From level</Label>
             <Input
@@ -353,6 +375,17 @@ export function AdminTeamLevelsPage() {
             />
           </div>
           <div>
+            <Label>Upline duration %</Label>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={bulk.uplineDurationCapPercent}
+              onChange={(e) => setBulk((b) => ({ ...b, uplineDurationCapPercent: Number(e.target.value) }))}
+            />
+            <p className="mt-0.5 text-[10px] text-[#6b6b7c]">% of downline plan days</p>
+          </div>
+          <div>
             <Label>Required directs</Label>
             <Input
               type="number"
@@ -374,7 +407,7 @@ export function AdminTeamLevelsPage() {
       </div>
 
       <div className="admin-panel-sheet space-y-3 p-4">
-        <div className="grid gap-3 md:grid-cols-6">
+        <div className="grid gap-3 md:grid-cols-7">
           <div>
             <Label>New — level index</Label>
             <Input
@@ -390,6 +423,19 @@ export function AdminTeamLevelsPage() {
               value={draft.percent}
               onChange={(e) => setDraft((d) => ({ ...d, percent: Number(e.target.value) }))}
             />
+          </div>
+          <div>
+            <Label>Upline duration %</Label>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={draft.uplineDurationCapPercent}
+              onChange={(e) =>
+                setDraft((d) => ({ ...d, uplineDurationCapPercent: Number(e.target.value) }))
+              }
+            />
+            <p className="mt-0.5 text-[10px] text-[#6b6b7c]">Of plan length</p>
           </div>
           <div>
             <Label>Required directs</Label>
@@ -437,11 +483,14 @@ export function AdminTeamLevelsPage() {
 
       <div className="admin-panel-sheet overflow-hidden p-0">
         <div className="max-w-[100vw] overflow-x-auto">
-          <table className="w-full min-w-[920px] text-left text-[12px] text-[#c4c4ce]">
+          <table className="w-full min-w-[1020px] text-left text-[12px] text-[#c4c4ce]">
             <thead className="border-b border-[rgba(212,175,55,0.15)] bg-[rgba(212,175,55,0.04)]">
               <tr className="text-[10px] font-bold uppercase tracking-wider text-[#6b6b7c]">
                 <th className="px-3 py-2.5 pl-4">Lvl</th>
                 <th className="px-3 py-2.5">%</th>
+                <th className="px-3 py-2.5 whitespace-nowrap" title="Share of downline plan length (days) upline earns this level">
+                  Dur. %
+                </th>
                 <th className="px-3 py-2.5">Directs</th>
                 <th className="px-3 py-2.5 min-w-[200px]">Condition</th>
                 <th className="px-3 py-2.5">Sort</th>
@@ -454,7 +503,7 @@ export function AdminTeamLevelsPage() {
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-[#9898a8]">
+                  <td colSpan={8} className="px-4 py-8 text-center text-[#9898a8]">
                     No team levels yet. Add one above.
                   </td>
                 </tr>
@@ -491,6 +540,25 @@ export function AdminTeamLevelsPage() {
                           />
                         ) : (
                           r.percent
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        {isEditing ? (
+                          <Input
+                            type="number"
+                            min={0}
+                            max={100}
+                            className="h-8 py-1 text-xs"
+                            value={editForm.uplineDurationCapPercent}
+                            onChange={(e) =>
+                              setEditForm((f) => ({
+                                ...f,
+                                uplineDurationCapPercent: Number(e.target.value),
+                              }))
+                            }
+                          />
+                        ) : (
+                          <span title="Upline earns this % of downline plan calendar days">{r.uplineDurationCapPercent}</span>
                         )}
                       </td>
                       <td className="px-3 py-2">

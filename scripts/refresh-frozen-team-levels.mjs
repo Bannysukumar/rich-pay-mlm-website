@@ -10,7 +10,8 @@
  *
  * Without --execute: prints team depth, frozen row count, and how many docs would be updated.
  *
- * Must stay in sync with `freezeTeamLevelsForActivation` in `functions/src/index.ts`.
+ * Must stay in sync with `freezeTeamLevelsForActivation` in `functions/src/index.ts`
+ * and `DEFAULT_UPLINE_DURATION_CAP_PERCENT` in `compensationDefaults.ts`.
  */
 
 import fs from 'node:fs'
@@ -27,6 +28,9 @@ const COL_TEAM_LEVELS = 'teamLevels'
 const COL_ACTIVE = 'activePackages'
 const COL_USERS = 'users'
 const COL_SETTINGS = 'siteSettings'
+
+/** Keep aligned with `functions/src/compensationDefaults.ts` */
+const DEFAULT_UPLINE_DURATION_CAP_PERCENT = 50
 
 const args = process.argv.slice(2).filter((a) => a !== '--execute')
 const EXECUTE = process.argv.includes('--execute')
@@ -65,10 +69,16 @@ function betterTeamLevelDoc(a, b) {
 
 function frozenRowFromTeamLevelData(lvl, x) {
   const desc = x.conditionDescription != null ? String(x.conditionDescription).trim() : ''
+  const rawCap = Number(x.uplineDurationCapPercent ?? DEFAULT_UPLINE_DURATION_CAP_PERCENT)
+  const uplineDurationCapPercent = Math.max(
+    0,
+    Math.min(100, Number.isFinite(rawCap) ? rawCap : DEFAULT_UPLINE_DURATION_CAP_PERCENT),
+  )
   const row = {
     level: lvl,
     percent: Number(x.percent ?? 0),
     requiredDirects: Number(x.requiredDirects ?? x.directs ?? 0),
+    uplineDurationCapPercent,
   }
   if (desc) row.conditionDescription = desc
   return row
@@ -97,7 +107,13 @@ async function freezeTeamLevelsForActivation(maxLevels) {
   }
   return Array.from({ length: cap }, (_, i) => {
     const L = i + 1
-    return byLevel.get(L) ?? { level: L, percent: 0, requiredDirects: 0, conditionDescription: '' }
+    return byLevel.get(L) ?? {
+      level: L,
+      percent: 0,
+      requiredDirects: 0,
+      conditionDescription: '',
+      uplineDurationCapPercent: DEFAULT_UPLINE_DURATION_CAP_PERCENT,
+    }
   })
 }
 

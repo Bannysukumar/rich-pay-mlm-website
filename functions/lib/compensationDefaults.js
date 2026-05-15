@@ -4,7 +4,9 @@
  * Team level doc IDs: seed_lvl_<n>. Rank doc IDs: seed_rank_giant_<n>.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.REFERENCE_RANK_SEED = exports.REFERENCE_TEAM_LEVEL_SEED = void 0;
+exports.REFERENCE_RANK_SEED = exports.REFERENCE_TEAM_LEVEL_SEED = exports.DEFAULT_UPLINE_DURATION_CAP_PERCENT = void 0;
+/** Default % of downline plan length (days) for upline team-level payout window (missing field uses same in functions). */
+exports.DEFAULT_UPLINE_DURATION_CAP_PERCENT = 50;
 function buildTeamSeed() {
     const out = [];
     out.push({
@@ -14,6 +16,7 @@ function buildTeamSeed() {
         requiredDirects: 0,
         conditionDescription: 'No condition',
         sortOrder: 10,
+        uplineDurationCapPercent: exports.DEFAULT_UPLINE_DURATION_CAP_PERCENT,
     });
     out.push({
         id: 'seed_lvl_2',
@@ -22,6 +25,7 @@ function buildTeamSeed() {
         requiredDirects: 2,
         conditionDescription: 'At least 2 active direct referrals',
         sortOrder: 20,
+        uplineDurationCapPercent: exports.DEFAULT_UPLINE_DURATION_CAP_PERCENT,
     });
     out.push({
         id: 'seed_lvl_3',
@@ -30,6 +34,7 @@ function buildTeamSeed() {
         requiredDirects: 3,
         conditionDescription: 'At least 3 active direct referrals',
         sortOrder: 30,
+        uplineDurationCapPercent: exports.DEFAULT_UPLINE_DURATION_CAP_PERCENT,
     });
     out.push({
         id: 'seed_lvl_4',
@@ -38,6 +43,7 @@ function buildTeamSeed() {
         requiredDirects: 4,
         conditionDescription: 'At least 4 active direct referrals',
         sortOrder: 40,
+        uplineDurationCapPercent: exports.DEFAULT_UPLINE_DURATION_CAP_PERCENT,
     });
     out.push({
         id: 'seed_lvl_5',
@@ -46,6 +52,7 @@ function buildTeamSeed() {
         requiredDirects: 5,
         conditionDescription: 'At least 5 active direct referrals',
         sortOrder: 50,
+        uplineDurationCapPercent: exports.DEFAULT_UPLINE_DURATION_CAP_PERCENT,
     });
     for (let l = 6; l <= 10; l++) {
         out.push({
@@ -55,6 +62,7 @@ function buildTeamSeed() {
             requiredDirects: 6,
             conditionDescription: 'At least 6 active direct referrals',
             sortOrder: 50 + l * 10,
+            uplineDurationCapPercent: exports.DEFAULT_UPLINE_DURATION_CAP_PERCENT,
         });
     }
     for (let l = 11; l <= 20; l++) {
@@ -65,6 +73,7 @@ function buildTeamSeed() {
             requiredDirects: 7,
             conditionDescription: 'At least 7 active direct referrals',
             sortOrder: 150 + l * 5,
+            uplineDurationCapPercent: exports.DEFAULT_UPLINE_DURATION_CAP_PERCENT,
         });
     }
     for (let l = 21; l <= 30; l++) {
@@ -75,6 +84,7 @@ function buildTeamSeed() {
             requiredDirects: 8,
             conditionDescription: 'At least 8 active direct referrals',
             sortOrder: 250 + l * 5,
+            uplineDurationCapPercent: exports.DEFAULT_UPLINE_DURATION_CAP_PERCENT,
         });
     }
     return out;

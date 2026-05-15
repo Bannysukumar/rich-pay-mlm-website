@@ -1,12 +1,14 @@
 import { collection, onSnapshot, query, where } from 'firebase/firestore'
 import { useEffect, useState } from 'react'
-import { COLLECTIONS } from '@/lib/constants'
+import { COLLECTIONS, DEFAULT_UPLINE_DURATION_CAP_PERCENT } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 
 export type PublicTeamLevelRow = {
   id: string
   level: number
   percent: number
+  /** 0–100: upline earns this level for first (plan duration days × this / 100) days after downline activation. */
+  uplineDurationCapPercent: number
   requiredDirects: number
   conditionDescription?: string
   sortOrder: number
@@ -28,10 +30,15 @@ export function usePublicTeamLevels() {
       (snap) => {
         const next: PublicTeamLevelRow[] = snap.docs.map((ds) => {
           const x = ds.data() as Record<string, unknown>
+          const capRaw = Number(x.uplineDurationCapPercent ?? DEFAULT_UPLINE_DURATION_CAP_PERCENT)
+          const uplineDurationCapPercent = Number.isFinite(capRaw)
+            ? Math.max(0, Math.min(100, capRaw))
+            : DEFAULT_UPLINE_DURATION_CAP_PERCENT
           return {
             id: ds.id,
             level: Number(x.level ?? 0),
             percent: Number(x.percent ?? 0),
+            uplineDurationCapPercent,
             requiredDirects: Number(x.requiredDirects ?? x.directs ?? 0),
             conditionDescription:
               x.conditionDescription != null ? String(x.conditionDescription).trim() : undefined,

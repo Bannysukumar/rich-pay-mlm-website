@@ -25,11 +25,17 @@ function Reveal({ children, className }: { children: ReactNode; className?: stri
 
 const PLAN_CARD_VARIANTS = ['', 'plans-card-accent', '', 'plans-card-platinum', ''] as const
 
-function teamLevelSubtitle(row: { requiredDirects: number }): string {
+function teamLevelSubtitle(row: { requiredDirects: number; uplineDurationCapPercent: number }): string {
   const d = row.requiredDirects
+  const cap = row.uplineDurationCapPercent
+  const capPart =
+    Number.isFinite(cap) && cap < 100
+      ? ` · upline share window: ${cap}% of downline plan length (days)`
+      : ''
   if (Number.isFinite(d) && d > 0) {
-    return `${d} active direct referral${d === 1 ? '' : 's'}`
+    return `${d} active direct referral${d === 1 ? '' : 's'}${capPart}`
   }
+  if (capPart) return capPart.replace(/^ · /, '')
   return 'As published in admin team matrix'
 }
 

@@ -54,6 +54,9 @@ const COL_SETTINGS = 'siteSettings'
 const COL_TEAM_LEVELS = 'teamLevels'
 const COL_RANKS = 'ranks'
 
+/** Keep aligned with `functions/src/compensationDefaults.ts` */
+const DEFAULT_UPLINE_DURATION_CAP_PERCENT = 50
+
 const TAG = 'imp_inv'
 
 function parseMoney(v) {
@@ -159,11 +162,21 @@ for (const d of tlSnap.docs) {
     percent: Number(x.percent ?? 0),
     requiredDirects: Number(x.requiredDirects ?? x.directs ?? 0),
     conditionDescription: x.conditionDescription != null ? String(x.conditionDescription).trim() : '',
+    uplineDurationCapPercent: (() => {
+      const raw = Number(x.uplineDurationCapPercent ?? DEFAULT_UPLINE_DURATION_CAP_PERCENT)
+      return Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : DEFAULT_UPLINE_DURATION_CAP_PERCENT
+    })(),
   })
 }
 const teamLevelsFrozen = Array.from({ length: teamDepth }, (_, i) => {
   const L = i + 1
-  return tlByLevel.get(L) ?? { level: L, percent: 0, requiredDirects: 0, conditionDescription: '' }
+  return tlByLevel.get(L) ?? {
+    level: L,
+    percent: 0,
+    requiredDirects: 0,
+    conditionDescription: '',
+    uplineDurationCapPercent: DEFAULT_UPLINE_DURATION_CAP_PERCENT,
+  }
 })
 
 console.log('Loading active ranks…')

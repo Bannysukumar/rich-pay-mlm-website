@@ -325,10 +325,13 @@ function betterTeamLevelDoc(a, b) {
 }
 function frozenRowFromTeamLevelData(lvl, x) {
     const desc = x.conditionDescription != null ? String(x.conditionDescription).trim() : '';
+    const rawCap = Number(x.uplineDurationCapPercent ?? compensationDefaults_1.DEFAULT_UPLINE_DURATION_CAP_PERCENT);
+    const uplineDurationCapPercent = Math.max(0, Math.min(100, Number.isFinite(rawCap) ? rawCap : compensationDefaults_1.DEFAULT_UPLINE_DURATION_CAP_PERCENT));
     return {
         level: lvl,
         percent: Number(x.percent ?? 0),
         requiredDirects: Number(x.requiredDirects ?? x.directs ?? 0),
+        uplineDurationCapPercent,
         ...(desc ? { conditionDescription: desc } : {}),
     };
 }
@@ -360,7 +363,13 @@ async function freezeTeamLevelsForActivation(maxLevels) {
     }
     return Array.from({ length: cap }, (_, i) => {
         const L = i + 1;
-        return byLevel.get(L) ?? { level: L, percent: 0, requiredDirects: 0, conditionDescription: '' };
+        return (byLevel.get(L) ?? {
+            level: L,
+            percent: 0,
+            requiredDirects: 0,
+            conditionDescription: '',
+            uplineDurationCapPercent: compensationDefaults_1.DEFAULT_UPLINE_DURATION_CAP_PERCENT,
+        });
     });
 }
 async function freezeRankRowsForActivation() {
@@ -464,8 +473,40 @@ async function paySponsorBonusForActivation(activePackageId, beneficiaryUid, act
         updatedAt: Date.now(),
     }, { merge: true });
 }
+/** Whole calendar days from package start (used with daily ROI cadence). */
+function wholeDaysSincePackageStart(startedAt, now) {
+    return Math.max(0, Math.floor((now.toMillis() - startedAt.toMillis()) / 86400000));
+}
+/** Cap % and max paying calendar days for this matrix row (null max = no day cap when plan duration unset). */
+function teamLevelWindowCapMaxPayDays(row, planDurationDays) {
+    const dur = Math.max(0, Math.floor(planDurationDays));
+    const rawCap = row.uplineDurationCapPercent != null
+        ? Number(row.uplineDurationCapPercent)
+        : compensationDefaults_1.DEFAULT_UPLINE_DURATION_CAP_PERCENT;
+    const capPct = Math.max(0, Math.min(100, Number.isFinite(rawCap) ? rawCap : compensationDefaults_1.DEFAULT_UPLINE_DURATION_CAP_PERCENT));
+    if (dur <= 0)
+        return { capPct, maxPayDays: null };
+    const maxPayDays = Math.floor((dur * capPct) / 100);
+    if (maxPayDays <= 0)
+        return { capPct, maxPayDays: 0 };
+    return { capPct, maxPayDays };
+}
+/**
+ * When downline plan has a positive duration, upline earns this row only while
+ * `elapsedDays < floor(durationDays × capPercent / 100)`. Missing cap on old snapshots uses
+ * `DEFAULT_UPLINE_DURATION_CAP_PERCENT`.
+ */
+function teamLevelPayoutWithinDownlinePlanWindow(row, startedAt, now, planDurationDays) {
+    const { maxPayDays } = teamLevelWindowCapMaxPayDays(row, planDurationDays);
+    if (maxPayDays === null)
+        return true;
+    if (maxPayDays <= 0)
+        return false;
+    const elapsed = wholeDaysSincePackageStart(startedAt, now);
+    return elapsed < maxPayDays;
+}
 /** Split of downline daily ROI to uplines — % × credited ROI; each pay min(gross, sponsor’s working room left). */
-async function distributeTeamLevelIncomeFromDailyRoi(downlineActivePackageId, downlineUid, dailyRoiCredited, planSnap) {
+async function distributeTeamLevelIncomeFromDailyRoi(downlineActivePackageId, downlineUid, dailyRoiCredited, planSnap, payoutClock) {
     if (dailyRoiCredited <= 1e-12 || !planSnap)
         return;
     const teamFrozen = Array.isArray(planSnap.teamLevels) ? planSnap.teamLevels : [];
@@ -490,6 +531,10 @@ async function distributeTeamLevelIncomeFromDailyRoi(downlineActivePackageId, do
         if (!upl)
             break;
         if (row && row.percent > 0) {
+            if (!teamLevelPayoutWithinDownlinePlanWindow(row, payoutClock.startedAt, payoutClock.now, payoutClock.durationDays)) {
+                child = upl;
+                continue;
+            }
             const uplRef = db.collection(COL_USERS).doc(upl);
             const uplSnap = await uplRef.get();
             if (uplSnap.exists && !Boolean(uplSnap.data()?.blocked) && (await uplHasActive(upl))) {
@@ -499,6 +544,8 @@ async function distributeTeamLevelIncomeFromDailyRoi(downlineActivePackageId, do
                     const remaining = await userWorkingIncomeRemaining(upl);
                     const payAmt = Math.min(gross, Math.max(0, remaining));
                     if (payAmt > 1e-12) {
+                        const { capPct, maxPayDays } = teamLevelWindowCapMaxPayDays(row, payoutClock.durationDays);
+                        const durSnap = Math.max(0, Math.floor(payoutClock.durationDays));
                         await uplRef.update({
                             'wallets.cash': firestore_1.FieldValue.increment(payAmt),
                             workingIncomeBalance: firestore_1.FieldValue.increment(payAmt),
@@ -522,6 +569,11 @@ async function distributeTeamLevelIncomeFromDailyRoi(downlineActivePackageId, do
                             activePackageId: downlineActivePackageId,
                             sourceDailyRoi: dailyRoiCredited,
                             distribution: 'daily_roi_share',
+                            /** Upline clients cannot read downline `activePackages`; denorm for dashboard “remaining days”. */
+                            downlinePackageStartedAt: payoutClock.startedAt,
+                            teamLevelWindowDurationDays: durSnap,
+                            teamLevelWindowCapPercent: capPct,
+                            teamLevelWindowMaxPayDays: maxPayDays,
                             ...(row.conditionDescription ? { conditionDescription: row.conditionDescription } : {}),
                             createdAt: firestore_1.FieldValue.serverTimestamp(),
                         });
@@ -2159,6 +2211,7 @@ exports.adminSeedCompensationDefaults = (0, https_1.onCall)(callableRuntimeOpts,
                     requiredDirects: row.requiredDirects,
                     conditionDescription: row.conditionDescription,
                     sortOrder: row.sortOrder,
+                    uplineDurationCapPercent: row.uplineDurationCapPercent,
                     active: true,
                     createdAt: Date.now(),
                     updatedAt: Date.now(),
@@ -2354,7 +2407,13 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
             activePackageId: docSnap.id,
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
-        await distributeTeamLevelIncomeFromDailyRoi(docSnap.id, userId, daily, planSnap);
+        const startedAt = ap.startedAt;
+        const durationDays = Number((planSnap && planSnap.durationDays != null ? planSnap.durationDays : null) ?? ap.durationDays ?? 0);
+        await distributeTeamLevelIncomeFromDailyRoi(docSnap.id, userId, daily, planSnap, {
+            startedAt,
+            now,
+            durationDays,
+        });
     }
 });
 /**

@@ -14,6 +14,32 @@ function fmtDate(ms: number) {
   })
 }
 
+function firestoreTsToMs(ts: unknown): number | null {
+  if (ts == null) return null
+  if (typeof ts === 'number' && Number.isFinite(ts)) return ts
+  const t = ts as { toMillis?: () => number; seconds?: number; _seconds?: number }
+  if (typeof t.toMillis === 'function') return t.toMillis()
+  const sec = t.seconds ?? t._seconds
+  if (typeof sec === 'number' && Number.isFinite(sec)) return sec * 1000
+  return null
+}
+
+/** Same whole-day rule as Cloud Functions `wholeDaysSincePackageStart`. */
+function wholeDaysSince(startedAtMs: number, nowMs: number): number {
+  return Math.max(0, Math.floor((nowMs - startedAtMs) / 86400000))
+}
+
+function remainingTeamLevelWindowDaysLabel(
+  startedAtMs: number | null,
+  maxPayDays: number | null | undefined,
+  nowMs: number,
+): string {
+  if (startedAtMs == null || maxPayDays === undefined) return '—'
+  if (maxPayDays === null) return 'No day cap'
+  const elapsed = wholeDaysSince(startedAtMs, nowMs)
+  return String(Math.max(0, maxPayDays - elapsed))
+}
+
 function describeEntry(d: Record<string, unknown>) {
   const desc = d.description
   if (typeof desc === 'string' && desc.trim()) return desc.trim()
@@ -28,14 +54,22 @@ type Row = {
   createdAtMs: number
   description: string
   amount: number
+  downlinePackageStartedAtMs: number | null
+  teamLevelWindowMaxPayDays: number | null | undefined
 }
 
 export function TeamLevelBonusPage() {
   const { firebaseUid, profile } = useAuthState()
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
+  const [nowTick, setNowTick] = useState(() => Date.now())
 
   const total = profile?.teamLevelCommissionTotal ?? 0
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 60_000)
+    return () => window.clearInterval(id)
+  }, [])
 
   useEffect(() => {
     if (!firebaseUid) {
@@ -56,11 +90,15 @@ export function TeamLevelBonusPage() {
           const ts = d.createdAt as { toMillis?: () => number } | undefined
           const createdAtMs =
             ts && typeof ts.toMillis === 'function' ? ts.toMillis() : Number(d.createdAt ?? 0)
+          const startedMs = firestoreTsToMs(d.downlinePackageStartedAt)
+          const maxDays = d.teamLevelWindowMaxPayDays as number | null | undefined
           next.push({
             id: doc.id,
             createdAtMs,
             description: describeEntry(d),
             amount: Number(d.amount ?? 0),
+            downlinePackageStartedAtMs: startedMs,
+            teamLevelWindowMaxPayDays: maxDays,
           })
         })
         setRows(next)
@@ -85,6 +123,10 @@ export function TeamLevelBonusPage() {
                 <h4 className="card-title">Total Team Level Bonus - $ {total.toFixed(4)}</h4>
               </div>
               <div className="card-body">
+                <p className="text-muted small mb-2">
+                  <strong>Remaining (days)</strong> estimates whole calendar days left in the team-level payout window
+                  for that downline stake (matches daily ROI rules). Legacy rows without stored window data show &quot;—&quot;.
+                </p>
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">
                     <thead>
@@ -92,19 +134,20 @@ export function TeamLevelBonusPage() {
                         <th>Serial </th>
                         <th>Date </th>
                         <th>Description </th>
+                        <th>Remaining (days) </th>
                         <th>Amount </th>
                       </tr>
                     </thead>
                     <tbody>
                       {loading ? (
                         <tr>
-                          <td colSpan={4} className="text-secondary">
+                          <td colSpan={5} className="text-secondary">
                             Loading…
                           </td>
                         </tr>
                       ) : rows.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="text-secondary">
+                          <td colSpan={5} className="text-secondary">
                             No team level bonus entries yet.
                           </td>
                         </tr>
@@ -114,6 +157,13 @@ export function TeamLevelBonusPage() {
                             <td>{i + 1}</td>
                             <td>{fmtDate(r.createdAtMs)}</td>
                             <td>{r.description}</td>
+                            <td>
+                              {remainingTeamLevelWindowDaysLabel(
+                                r.downlinePackageStartedAtMs,
+                                r.teamLevelWindowMaxPayDays,
+                                nowTick,
+                              )}
+                            </td>
                             <td>{r.amount.toFixed(4)}</td>
                           </tr>
                         ))
