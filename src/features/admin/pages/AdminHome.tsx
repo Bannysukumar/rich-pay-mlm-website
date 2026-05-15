@@ -25,6 +25,7 @@ import {
   IconGift,
   IconHierarchy,
   IconAward,
+  IconPackage,
 } from '@tabler/icons-react'
 import { motion } from 'framer-motion'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -46,6 +47,10 @@ import { cn } from '@/lib/utils/cn'
 
 type Metrics = {
   users: number
+  /** All `activePackages` with `status === 'active'` (across every member). */
+  activePackages: number
+  /** `status` is `completed` or `capped` — ended stakes still in the collection. */
+  inactivePackages: number
   depositsPending: number
   depositsApproved: number
   withdrawalsPending: number
@@ -71,6 +76,8 @@ type PlatformWalletTotals = {
 
 const emptyMetrics: Metrics = {
   users: 0,
+  activePackages: 0,
+  inactivePackages: 0,
   depositsPending: 0,
   depositsApproved: 0,
   withdrawalsPending: 0,
@@ -152,6 +159,8 @@ export function AdminHome() {
       const t0 = startOfUtcDayMs()
       const [
         users,
+        activePackages,
+        inactivePackages,
         depositsPending,
         depositsApproved,
         withdrawalsPending,
@@ -161,6 +170,10 @@ export function AdminHome() {
         walletTotals,
       ] = await Promise.all([
         getCountFromServer(collection(db, COLLECTIONS.users)),
+        getCountFromServer(query(collection(db, COLLECTIONS.activePackages), where('status', '==', 'active'))),
+        getCountFromServer(
+          query(collection(db, COLLECTIONS.activePackages), where('status', 'in', ['completed', 'capped'])),
+        ),
         getCountFromServer(query(collection(db, COLLECTIONS.deposits), where('status', '==', 'pending'))),
         getCountFromServer(query(collection(db, COLLECTIONS.deposits), where('status', '==', 'approved'))),
         getCountFromServer(query(collection(db, COLLECTIONS.withdrawals), where('status', '==', 'pending'))),
@@ -180,6 +193,8 @@ export function AdminHome() {
 
       setM({
         users: users.data().count,
+        activePackages: activePackages.data().count,
+        inactivePackages: inactivePackages.data().count,
         depositsPending: depositsPending.data().count,
         depositsApproved: depositsApproved.data().count,
         withdrawalsPending: withdrawalsPending.data().count,
@@ -223,6 +238,16 @@ export function AdminHome() {
           label: 'Total users',
           value: m.users,
           icon: <IconUsers className="size-5" stroke={1.5} />,
+        },
+        {
+          label: 'Active packages (all members)',
+          value: m.activePackages,
+          icon: <IconPackage className="size-5" stroke={1.5} />,
+        },
+        {
+          label: 'Inactive packages (completed / capped)',
+          value: m.inactivePackages,
+          icon: <IconPackage className="size-5" stroke={1.5} />,
         },
         {
           label: 'Pending deposits',
@@ -338,7 +363,8 @@ export function AdminHome() {
             <span className="admin-chip">Live · 30s</span>
           </div>
           <p className="mt-2 max-w-2xl text-[0.9rem] leading-relaxed text-[#9898a8]">
-            High-level counts across members, treasury, and support. Wallet totals sum every <code className="text-[#a8a8b8]">users</code>{' '}
+            High-level counts across members, treasury, support, and <code className="text-[#a8a8b8]">activePackages</code>{' '}
+            stakes. Wallet totals sum every <code className="text-[#a8a8b8]">users</code>{' '}
             profile (paginated reads). Counts use aggregation where available.
           </p>
         </div>
@@ -391,7 +417,7 @@ export function AdminHome() {
         </p>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4">
         {kpi.map((row) => (
           <AdminStatCard
             key={row.label}
