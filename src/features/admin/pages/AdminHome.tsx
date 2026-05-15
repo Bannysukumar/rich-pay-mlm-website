@@ -1,7 +1,19 @@
-import { collection, getCountFromServer, query, where } from 'firebase/firestore'
+import type { QueryDocumentSnapshot } from 'firebase/firestore'
+import {
+  collection,
+  documentId,
+  getCountFromServer,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  startAfter,
+  where,
+} from 'firebase/firestore'
 import {
   IconChartBarPopular,
   IconClock,
+  IconCoin,
   IconRefresh,
   IconUsers,
   IconWallet,
@@ -9,6 +21,10 @@ import {
   IconCash,
   IconTicket,
   IconAlertCircle,
+  IconChartLine,
+  IconGift,
+  IconHierarchy,
+  IconAward,
 } from '@tabler/icons-react'
 import { motion } from 'framer-motion'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -38,6 +54,21 @@ type Metrics = {
   todayRegs: number
 }
 
+/** Sums of every member `users` doc — wallets + key balance / ledger fields. */
+type PlatformWalletTotals = {
+  profiles: number
+  walletDeposit: number
+  walletActivation: number
+  walletCash: number
+  nonWorkingIncomeBalance: number
+  workingIncomeBalance: number
+  userTotalsTotalWorkingIncome: number
+  sponsorBonusTotal: number
+  dailyProfitsTotal: number
+  teamLevelCommissionTotal: number
+  rankCommissionTotal: number
+}
+
 const emptyMetrics: Metrics = {
   users: 0,
   depositsPending: 0,
@@ -48,6 +79,58 @@ const emptyMetrics: Metrics = {
   todayRegs: 0,
 }
 
+const emptyWalletTotals: PlatformWalletTotals = {
+  profiles: 0,
+  walletDeposit: 0,
+  walletActivation: 0,
+  walletCash: 0,
+  nonWorkingIncomeBalance: 0,
+  workingIncomeBalance: 0,
+  userTotalsTotalWorkingIncome: 0,
+  sponsorBonusTotal: 0,
+  dailyProfitsTotal: 0,
+  teamLevelCommissionTotal: 0,
+  rankCommissionTotal: 0,
+}
+
+function foldUserIntoWalletTotals(t: PlatformWalletTotals, data: Record<string, unknown>) {
+  const w = (data.wallets as Record<string, unknown> | undefined) || {}
+  t.profiles += 1
+  t.walletDeposit += Number(w.deposit ?? 0) || 0
+  t.walletActivation += Number(w.activation ?? 0) || 0
+  t.walletCash += Number(w.cash ?? 0) || 0
+  t.nonWorkingIncomeBalance += Number(data.nonWorkingIncomeBalance ?? 0) || 0
+  t.workingIncomeBalance += Number(data.workingIncomeBalance ?? 0) || 0
+  const ut = data.userTotals as Record<string, unknown> | undefined
+  t.userTotalsTotalWorkingIncome += Number(ut?.totalWorkingIncome ?? 0) || 0
+  t.sponsorBonusTotal += Number(data.sponsorBonusTotal ?? 0) || 0
+  t.dailyProfitsTotal += Number(data.dailyProfitsTotal ?? 0) || 0
+  t.teamLevelCommissionTotal += Number(data.teamLevelCommissionTotal ?? 0) || 0
+  t.rankCommissionTotal += Number(data.rankCommissionTotal ?? 0) || 0
+}
+
+async function scanAllMemberWalletTotals(): Promise<PlatformWalletTotals> {
+  const totals: PlatformWalletTotals = { ...emptyWalletTotals }
+  const pageSize = 500
+  let last: QueryDocumentSnapshot | undefined
+  for (;;) {
+    const q = last
+      ? query(collection(db, COLLECTIONS.users), orderBy(documentId()), startAfter(last), limit(pageSize))
+      : query(collection(db, COLLECTIONS.users), orderBy(documentId()), limit(pageSize))
+    const snap = await getDocs(q)
+    if (snap.empty) break
+    snap.forEach((d) => foldUserIntoWalletTotals(totals, d.data() as Record<string, unknown>))
+    last = snap.docs[snap.docs.length - 1]
+    if (snap.size < pageSize) break
+  }
+  return totals
+}
+
+function fmtUsd(n: number) {
+  const x = Number.isFinite(n) ? n : 0
+  return `$${x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
 function startOfUtcDayMs() {
   const d = new Date()
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0, 0)
@@ -55,13 +138,16 @@ function startOfUtcDayMs() {
 
 export function AdminHome() {
   const [m, setM] = useState<Metrics>(emptyMetrics)
+  const [wallets, setWallets] = useState<PlatformWalletTotals>(emptyWalletTotals)
   const [loading, setLoading] = useState(true)
   const [series, setSeries] = useState<{ name: string; deposits: number; withdrawals: number }[]>([])
   const [err, setErr] = useState<string | null>(null)
+  const [walletsErr, setWalletsErr] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
     setErr(null)
+    setWalletsErr(null)
     try {
       const t0 = startOfUtcDayMs()
       const [
@@ -72,6 +158,7 @@ export function AdminHome() {
         withdrawalsPaid,
         ticketsOpen,
         todayRegs,
+        walletTotals,
       ] = await Promise.all([
         getCountFromServer(collection(db, COLLECTIONS.users)),
         getCountFromServer(query(collection(db, COLLECTIONS.deposits), where('status', '==', 'pending'))),
@@ -82,6 +169,13 @@ export function AdminHome() {
         getCountFromServer(
           query(collection(db, COLLECTIONS.users), where('createdAt', '>=', t0)),
         ).catch(() => ({ data: () => ({ count: 0 }) })),
+        scanAllMemberWalletTotals().catch((e: unknown) => {
+          const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message?: string }).message) : ''
+          setWalletsErr(
+            msg || 'Could not sum member wallets (check Firestore rules / network), then use Refresh.',
+          )
+          return { ...emptyWalletTotals }
+        }),
       ])
 
       setM({
@@ -93,6 +187,7 @@ export function AdminHome() {
         ticketsOpen: ticketsOpen.data().count,
         todayRegs: todayRegs.data().count,
       })
+      setWallets(walletTotals)
 
       const mix = Math.max(
         depositsApproved.data().count + depositsPending.data().count,
@@ -161,6 +256,73 @@ export function AdminHome() {
   const chartHasSignal = series.some((r) => r.deposits > 0 || r.withdrawals > 0)
   const allKpiZero = !loading && kpi.every((k) => k.value === 0)
 
+  const walletCards = useMemo(
+    () =>
+      [
+        {
+          label: 'All members — deposit wallet',
+          value: fmtUsd(wallets.walletDeposit),
+          icon: <IconWallet className="size-5" stroke={1.5} />,
+          hint: 'Σ users.wallets.deposit',
+        },
+        {
+          label: 'All members — activation wallet',
+          value: fmtUsd(wallets.walletActivation),
+          icon: <IconCoin className="size-5" stroke={1.5} />,
+          hint: 'Σ users.wallets.activation',
+        },
+        {
+          label: 'All members — cash wallet',
+          value: fmtUsd(wallets.walletCash),
+          icon: <IconCash className="size-5" stroke={1.5} />,
+          hint: 'Σ users.wallets.cash',
+        },
+        {
+          label: 'Non-working income balance',
+          value: fmtUsd(wallets.nonWorkingIncomeBalance),
+          icon: <IconChartLine className="size-5" stroke={1.5} />,
+          hint: 'Σ users.nonWorkingIncomeBalance',
+        },
+        {
+          label: 'Working income balance',
+          value: fmtUsd(wallets.workingIncomeBalance),
+          icon: <IconChartLine className="size-5" stroke={1.5} />,
+          hint: 'Σ users.workingIncomeBalance',
+        },
+        {
+          label: 'Total working income (cap track)',
+          value: fmtUsd(wallets.userTotalsTotalWorkingIncome),
+          icon: <IconChartLine className="size-5" stroke={1.5} />,
+          hint: 'Σ users.userTotals.totalWorkingIncome',
+        },
+        {
+          label: 'Sponsor bonus (cumulative)',
+          value: fmtUsd(wallets.sponsorBonusTotal),
+          icon: <IconGift className="size-5" stroke={1.5} />,
+          hint: 'Σ users.sponsorBonusTotal',
+        },
+        {
+          label: 'Daily profits (cumulative)',
+          value: fmtUsd(wallets.dailyProfitsTotal),
+          icon: <IconChartBarPopular className="size-5" stroke={1.5} />,
+          hint: 'Σ users.dailyProfitsTotal',
+        },
+        {
+          label: 'Team level commission (cumulative)',
+          value: fmtUsd(wallets.teamLevelCommissionTotal),
+          icon: <IconHierarchy className="size-5" stroke={1.5} />,
+          hint: 'Σ users.teamLevelCommissionTotal',
+        },
+        {
+          label: 'Rank commission (cumulative)',
+          value: fmtUsd(wallets.rankCommissionTotal),
+          icon: <IconAward className="size-5" stroke={1.5} />,
+          hint: 'Σ users.rankCommissionTotal',
+        },
+      ] as const,
+    [wallets],
+  )
+
   return (
     <div className="space-y-8">
       <motion.section
@@ -176,7 +338,8 @@ export function AdminHome() {
             <span className="admin-chip">Live · 30s</span>
           </div>
           <p className="mt-2 max-w-2xl text-[0.9rem] leading-relaxed text-[#9898a8]">
-            High-level counts across members, treasury, and support. Numbers use Firestore aggregation queries.
+            High-level counts across members, treasury, and support. Wallet totals sum every <code className="text-[#a8a8b8]">users</code>{' '}
+            profile (paginated reads). Counts use aggregation where available.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -208,6 +371,19 @@ export function AdminHome() {
         </div>
       )}
 
+      {walletsErr && (
+        <div
+          role="alert"
+          className="admin-panel-sheet flex gap-3 border border-red-500/35 bg-red-950/25 px-4 py-3 text-[0.9rem] text-red-100"
+        >
+          <IconAlertCircle className="mt-0.5 size-5 shrink-0 text-red-300" stroke={1.5} />
+          <div>
+            <p className="font-semibold">Wallet totals unavailable</p>
+            <p className="mt-1 text-[0.78rem] text-red-200/90">{walletsErr}</p>
+          </div>
+        </div>
+      )}
+
       {!err && !loading && allKpiZero && (
         <p className="admin-panel-sheet border px-4 py-3 text-[0.9rem] text-[#9898a8]">
           No activity recorded yet—or queries returned zero. Once users and deposits exist, this dashboard fills in
@@ -226,6 +402,34 @@ export function AdminHome() {
           />
         ))}
       </div>
+
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b pb-4 admin-divider-soft">
+          <div>
+            <h3 className="text-[1.05rem] font-bold text-[#e4e4e7]">Member balances (platform totals)</h3>
+            <p className="mt-1 max-w-3xl text-[0.85rem] text-[#9898a8]">
+              Sum of every profile in <span className="font-mono text-[#c4c4ce]">users</span>. Same fields as{' '}
+              <span className="text-[#c4c4ce]">Member balance adjustment</span>; refreshes with the dashboard (30s or
+              Refresh).
+              {!loading && !walletsErr ? (
+                <span className="ml-1 text-[#6b6b7c]">· {wallets.profiles} profiles summed</span>
+              ) : null}
+            </p>
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {walletCards.map((row) => (
+            <AdminStatCard
+              key={row.label}
+              label={row.label}
+              value={row.value}
+              loading={loading}
+              icon={row.icon}
+              hint={row.hint}
+            />
+          ))}
+        </div>
+      </section>
 
       <section className="admin-panel-sheet shadow-[0_20px_50px_-30px_rgba(0,0,0,0.65)]">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b admin-divider-soft px-4 py-3.5 sm:px-5">
