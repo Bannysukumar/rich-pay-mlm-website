@@ -1,4 +1,4 @@
-import { IconMenu2 } from '@tabler/icons-react'
+import { IconMenu2, IconMoon, IconSun } from '@tabler/icons-react'
 import { Link } from 'react-router-dom'
 import { SquaresFour } from '@phosphor-icons/react'
 import { useAuthState } from '@/hooks/useAuth'
@@ -6,9 +6,11 @@ import { cn } from '@/lib/utils/cn'
 
 type Props = {
   onMenuOpen?: () => void
+  darkMode: boolean
+  onToggleTheme: () => void
 }
 
-export function AdminHeader({ onMenuOpen }: Props) {
+export function AdminHeader({ onMenuOpen, darkMode, onToggleTheme }: Props) {
   const { profile } = useAuthState()
   const name = profile?.fullName || profile?.username || 'Administrator'
 
@@ -28,17 +30,28 @@ export function AdminHeader({ onMenuOpen }: Props) {
             <SquaresFour size={22} weight="bold" aria-hidden />
           </span>
           <div className="min-w-0">
-            <p className="truncate text-[0.72rem] font-semibold uppercase tracking-[0.14em] text-[#6b6b7c]">Rich Pay</p>
-            <h1 className="truncate text-[1rem] font-bold leading-tight text-[#e4e4e7] sm:text-[1.05rem]">
+            <p className="admin-head-kicker truncate text-[0.72rem] font-semibold uppercase tracking-[0.14em]">
+              Rich Pay
+            </p>
+            <h1 className="admin-head-title truncate text-[1rem] font-bold leading-tight sm:text-[1.05rem]">
               Administrator
             </h1>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+          <button
+            type="button"
+            className="admin-head-icon"
+            onClick={onToggleTheme}
+            aria-label={darkMode ? 'Switch to light theme' : 'Switch to dark theme'}
+            title={darkMode ? 'Light mode' : 'Dark mode'}
+          >
+            {darkMode ? <IconSun className="size-[22px]" stroke={1.5} /> : <IconMoon className="size-[22px]" stroke={1.5} />}
+          </button>
           <div className="hidden max-w-[200px] text-right leading-tight md:block lg:max-w-[280px]">
-            <div className="truncate text-[0.9rem] font-semibold text-[#c4c4ce]">{name}</div>
-            <div className="truncate font-mono text-[0.7rem] text-[#6b6b7c]">{profile?.email ?? '—'}</div>
+            <div className="admin-head-user-name truncate text-[0.9rem] font-semibold">{name}</div>
+            <div className="admin-head-user-email truncate font-mono text-[0.7rem]">{profile?.email ?? '—'}</div>
           </div>
           <Link
             to="/dashboard"

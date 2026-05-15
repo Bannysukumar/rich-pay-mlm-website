@@ -364,3 +364,148 @@
 #admin-dashboard-root .admin-divider-soft {
   border-color: var(--admin-border);
 }
+
+/* ── Stat card typography (theme-aware) ─────────────────────────────────── */
+#admin-dashboard-root .admin-stat-label {
+  color: #9898a8;
+}
+
+#admin-dashboard-root .admin-stat-value {
+  color: #e4e4e7;
+}
+
+#admin-dashboard-root .admin-stat-hint {
+  color: #9898a8;
+}
+
+#admin-dashboard-root .admin-stat-skeleton {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Header typography (theme-aware) ───────────────────────────────────── */
+#admin-dashboard-root .admin-head-kicker {
+  color: var(--admin-nav-muted);
+}
+
+#admin-dashboard-root .admin-head-title {
+  color: var(--admin-body-fg);
+}
+
+#admin-dashboard-root .admin-head-user-name {
+  color: #c4c4ce;
+}
+
+#admin-dashboard-root .admin-head-user-email {
+  color: var(--admin-nav-muted);
+}
+
+/* ── Light theme (toggle: remove `.dark` from #admin-dashboard-root) ───── */
+#admin-dashboard-root:not(.dark) {
+  color-scheme: light;
+  --admin-bg: #f1f2f5;
+  --admin-panel: #ffffff;
+  --admin-border: rgba(15, 23, 42, 0.1);
+  --admin-muted: #64748b;
+  --admin-body-fg: #0f172a;
+  --admin-header-bg: rgba(255, 255, 255, 0.92);
+  --admin-icon-bg: rgba(15, 23, 42, 0.06);
+  --admin-nav-fg: #334155;
+  --admin-nav-muted: #64748b;
+  --admin-teal-name: #0f766e;
+}
+
+#admin-dashboard-root:not(.dark) .admin-nav-meta {
+  color: #334155;
+  opacity: 0.95;
+}
+
+#admin-dashboard-root:not(.dark) .admin-nav-online-dot {
+  border-color: var(--admin-panel);
+}
+
+#admin-dashboard-root:not(.dark) .admin-back-member {
+  background: rgba(15, 23, 42, 0.04);
+}
+
+#admin-dashboard-root:not(.dark) .admin-stat-label,
+#admin-dashboard-root:not(.dark) .admin-stat-hint {
+  color: #64748b;
+}
+
+#admin-dashboard-root:not(.dark) .admin-stat-value {
+  color: #0f172a;
+}
+
+#admin-dashboard-root:not(.dark) .admin-stat-skeleton {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+#admin-dashboard-root:not(.dark) .admin-head-user-name {
+  color: #334155;
+}
+
+#admin-dashboard-root:not(.dark) .admin-stat-card:hover {
+  box-shadow: 0 12px 36px -18px rgba(15, 23, 42, 0.12);
+}
+
+/* Map common Tailwind arbitrary text colors used in admin pages (light mode) */
+#admin-dashboard-root:not(.dark) [class*='text-[#e4e4e7]'] {
+  color: #0f172a !important;
+}
+
+#admin-dashboard-root:not(.dark) [class*='text-[#9898a8]'] {
+  color: #64748b !important;
+}
+
+#admin-dashboard-root:not(.dark) [class*='text-[#6b6b7c]'] {
+  color: #64748b !important;
+}
+
+#admin-dashboard-root:not(.dark) [class*='text-[#c4c4ce]'] {
+  color: #475569 !important;
+}
+
+#admin-dashboard-root:not(.dark) [class*='text-[#a8a8b8]'] {
+  color: #64748b !important;
+}
+
+#admin-dashboard-root:not(.dark) [class*='text-[#a1a1b0]'] {
+  color: #64748b !important;
+}
+
+#admin-dashboard-root:not(.dark) [class*='text-[#f5e6a8]'] {
+  color: #a16207 !important;
+}
+
+#admin-dashboard-root:not(.dark) [class*='text-[#fcf6d9]'] {
+  color: #854d0e !important;
+}
+
+#admin-dashboard-root:not(.dark) [class*='text-[#ebe4c8]'] {
+  color: #57534e !important;
+}
+
+#admin-dashboard-root:not(.dark) [class*='bg-black/30'],
+#admin-dashboard-root:not(.dark) [class*='bg-black/40'] {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+}
+
+#admin-dashboard-root:not(.dark) [class*='bg-[#1a1d21'] {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+}
+
+#admin-dashboard-root:not(.dark) [class*='border-zinc-600'] {
+  border-color: rgba(15, 23, 42, 0.18) !important;
+}
+
+#admin-dashboard-root:not(.dark) [class*='border-[#52525b'] {
+  border-color: rgba(15, 23, 42, 0.2) !important;
+}
+
+#admin-dashboard-root:not(.dark) .recharts-cartesian-axis-tick-value {
+  fill: #64748b;
+}
+
+#admin-dashboard-root:not(.dark) .recharts-legend-item-text {
+  fill: #64748b;
+}

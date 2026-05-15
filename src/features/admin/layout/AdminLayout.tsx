@@ -1,15 +1,50 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { AdminHeader } from '@/components/admin/AdminHeader'
 import { AdminSidebar } from '@/components/admin/AdminSidebar'
 import '@/styles/admin-panel.css'
 import { cn } from '@/lib/utils/cn'
 
+const ADMIN_THEME_KEY = 'richpay-admin-dark'
+
+function readStoredDark(): boolean {
+  try {
+    return localStorage.getItem(ADMIN_THEME_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
+
 export function AdminLayout() {
   const [mobileNav, setMobileNav] = useState(false)
+  const [darkMode, setDarkMode] = useState(() => readStoredDark())
+
+  const toggleTheme = useCallback(() => {
+    setDarkMode((d) => {
+      const next = !d
+      try {
+        localStorage.setItem(ADMIN_THEME_KEY, next ? '1' : '0')
+      } catch {
+        /* ignore */
+      }
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    const prev = document.body.style.backgroundColor
+    if (!darkMode) {
+      document.body.style.backgroundColor = '#f4f4f7'
+    } else {
+      document.body.style.backgroundColor = ''
+    }
+    return () => {
+      document.body.style.backgroundColor = prev
+    }
+  }, [darkMode])
 
   return (
-    <div id="admin-dashboard-root" className="ltr dark">
+    <div id="admin-dashboard-root" className={cn('ltr', darkMode && 'dark')}>
       <div className="admin-app-wrapper">
         {mobileNav && (
           <button
@@ -29,7 +64,11 @@ export function AdminLayout() {
         />
 
         <div className="admin-app-main">
-          <AdminHeader onMenuOpen={() => setMobileNav(true)} />
+          <AdminHeader
+            onMenuOpen={() => setMobileNav(true)}
+            darkMode={darkMode}
+            onToggleTheme={toggleTheme}
+          />
           <div className="admin-content">
             <Outlet />
           </div>
