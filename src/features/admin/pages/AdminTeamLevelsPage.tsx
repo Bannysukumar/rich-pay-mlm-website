@@ -3,11 +3,13 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDocs,
   limit,
   onSnapshot,
   query,
   serverTimestamp,
   updateDoc,
+  where,
 } from 'firebase/firestore'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
@@ -28,6 +30,57 @@ type LvlRow = {
   conditionDescription: string
   active: boolean
   sortOrder: number
+}
+
+/**
+ * When multiple `teamLevels` docs are `active` for the same `level`, Cloud Functions pick one
+ * deterministically — new activations can still look "stuck" on an old %. After saving the row
+ * the admin intends as canonical, turn off other active rows for that level.
+ */
+async function deactivateOtherActiveSameLevel(keepDocId: string, level: number) {
+  if (!Number.isFinite(level) || level < 1) return
+  const q = query(
+    collection(db, COLLECTIONS.teamLevels),
+    where('level', '==', level),
+    where('active', '==', true),
+  )
+  const snap = await getDocs(q)
+  const others = snap.docs.filter((d) => d.id !== keepDocId)
+  if (others.length === 0) return
+  await Promise.all(
+    others.map((d) => updateDoc(d.ref, { active: false, updatedAt: serverTimestamp() })),
+  )
+}
+
+/** After bulk edits, for each level in [lo, hi] keep at most one active row (latest `updatedAt`). */
+async function pruneDuplicateActiveLevelsInRange(lo: number, hi: number) {
+  for (let level = lo; level <= hi; level++) {
+    const q = query(
+      collection(db, COLLECTIONS.teamLevels),
+      where('level', '==', level),
+      where('active', '==', true),
+    )
+    const snap = await getDocs(q)
+    if (snap.size <= 1) continue
+    const scored = snap.docs.map((d) => {
+      const x = d.data() as Record<string, unknown>
+      const u = x.updatedAt
+      let ms = 0
+      if (u != null && typeof (u as { toMillis?: () => number }).toMillis === 'function') {
+        ms = (u as { toMillis: () => number }).toMillis()
+      } else if (typeof u === 'number' && Number.isFinite(u)) ms = u
+      const c = x.createdAt
+      if (ms === 0 && c != null && typeof (c as { toMillis?: () => number }).toMillis === 'function') {
+        ms = (c as { toMillis: () => number }).toMillis()
+      } else if (ms === 0 && typeof c === 'number' && Number.isFinite(c)) ms = c
+      return { d, ms }
+    })
+    scored.sort((a, b) => b.ms - a.ms || b.d.id.localeCompare(a.d.id))
+    const [, ...rest] = scored
+    await Promise.all(
+      rest.map(({ d }) => updateDoc(d.ref, { active: false, updatedAt: serverTimestamp() })),
+    )
+  }
 }
 
 function TableActionBtn({
@@ -135,6 +188,9 @@ export function AdminTeamLevelsPage() {
         sortOrder: editForm.sortOrder,
         updatedAt: serverTimestamp(),
       })
+      if (editForm.active) {
+        await deactivateOtherActiveSameLevel(editingId, editForm.level)
+      }
       await pushAuditLog('adminTeamLevelUpdate', { id: editingId, ...editForm })
       await bumpPlanSettingsVersion()
       toast.success('Team level updated')
@@ -146,12 +202,15 @@ export function AdminTeamLevelsPage() {
 
   const addLevel = async () => {
     try {
-      await addDoc(collection(db, COLLECTIONS.teamLevels), {
+      const ref = await addDoc(collection(db, COLLECTIONS.teamLevels), {
         ...draft,
         conditionDescription: draft.conditionDescription.trim(),
         updatedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
       })
+      if (draft.active) {
+        await deactivateOtherActiveSameLevel(ref.id, draft.level)
+      }
       await pushAuditLog('adminTeamLevelAdd', draft)
       await bumpPlanSettingsVersion()
       toast.success('Team level added')
@@ -191,6 +250,7 @@ export function AdminTeamLevelsPage() {
           updatedAt: serverTimestamp(),
         })
       }
+      await pruneDuplicateActiveLevelsInRange(lo, hi)
       await pushAuditLog('adminTeamLevelBulk', { lo, hi, ...bulk })
       await bumpPlanSettingsVersion()
       toast.success(`Updated ${targets.length} level rows`)
@@ -244,9 +304,9 @@ export function AdminTeamLevelsPage() {
             role="status"
           >
             <strong className="font-semibold">Duplicate active levels:</strong> levels{' '}
-            {duplicateActiveLevels.join(', ')} each have more than one active row. Cloud Functions now pick the
-            most recently updated row per level for new activations; deactivate or delete extras so only one active row
-            per level remains.
+            {duplicateActiveLevels.join(', ')} each have more than one active row. Saving <strong>Edit</strong> on an
+            active row now turns off other active rows for that level. Bulk range updates prune duplicates by latest
+            timestamp. You can still deactivate extras manually.
           </div>
         ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
