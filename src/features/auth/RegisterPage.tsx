@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { PublicNavbar } from '@/features/landing/PublicNavbar'
 import '@/features/landing/landing.css'
 import { useAuthState } from '@/hooks/useAuth'
+import { homePathForRole } from '@/lib/auth/homePath'
 import { publicResolveReferrerCallable, registerWithProfile } from '@/lib/api/authCallables'
 import { auth } from '@/lib/firebase'
 
@@ -141,7 +142,7 @@ export function RegisterPage() {
   }
 
   if (firebaseUid) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to={homePathForRole(profile?.role)} replace />
   }
 
   return (

@@ -15,13 +15,10 @@ import { PublicNavbar } from '@/features/landing/PublicNavbar'
 import '@/features/landing/landing.css'
 import { doc, getDoc } from 'firebase/firestore'
 import { useAuthState } from '@/hooks/useAuth'
+import { safeAuthReturnPath } from '@/lib/auth/homePath'
+import { COLLECTIONS } from '@/lib/constants'
 import { auth, db } from '@/lib/firebase'
-
-function safeReturnPath(from: unknown): string {
-  if (typeof from !== 'string' || !from.startsWith('/') || from.startsWith('//')) return '/dashboard'
-  if (from.includes('..')) return '/dashboard'
-  return from
-}
+import type { UserProfile } from '@/types/models'
 
 /**
  * Accept either a numeric USERID or a plain email.
@@ -109,7 +106,7 @@ export function LoginPage() {
   const sessionOk = Boolean(firebaseUid) && !profile?.blocked
   if (sessionOk) {
     const from = (loc.state as { from?: string } | undefined)?.from
-    return <Navigate to={safeReturnPath(from)} replace />
+    return <Navigate to={safeAuthReturnPath(from, profile?.role)} replace />
   }
 
   const onSubmit = async (data: Form) => {
@@ -117,9 +114,20 @@ export function LoginPage() {
       // IndexedDB survives browser quit; session storage is cleared when the session ends.
       await setPersistence(auth, staySignedIn ? indexedDBLocalPersistence : browserSessionPersistence)
       const signInEmail = await resolveSignInEmail(data.userid)
-      await signInWithEmailAndPassword(auth, signInEmail, normalizeLoginPassword(data.password))
+      const cred = await signInWithEmailAndPassword(auth, signInEmail, normalizeLoginPassword(data.password))
+      let role: UserProfile['role'] = 'user'
+      try {
+        const snap = await getDoc(doc(db, COLLECTIONS.users, cred.user.uid))
+        if (snap.exists()) {
+          const r = snap.data()?.role
+          if (r === 'admin' || r === 'user') role = r
+        }
+      } catch {
+        /* profile listener will resolve role shortly */
+      }
       toast.success('Welcome back')
-      navigate('/dashboard', { replace: true })
+      const from = (loc.state as { from?: string } | undefined)?.from
+      navigate(safeAuthReturnPath(from, role), { replace: true })
     } catch {
       toast.error('Invalid credentials')
     }

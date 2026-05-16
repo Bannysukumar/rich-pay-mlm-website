@@ -3,14 +3,14 @@ import '@/styles/dashboard-ki.css'
 
 import { useEffect, useRef, useState } from 'react'
 import { Offcanvas } from 'react-bootstrap'
-import { Outlet } from 'react-router-dom'
+import { Navigate, Outlet } from 'react-router-dom'
 import { CaretUp } from '@phosphor-icons/react'
 import { KiDashboardHeader } from '@/components/dashboard/KiDashboardHeader'
 import { KiDashboardNav } from '@/components/dashboard/KiDashboardNav'
 import { useAuthState } from '@/hooks/useAuth'
 
 export function DashboardLayout() {
-  const { profile } = useAuthState()
+  const { profile, profileLoaded } = useAuthState()
   const [mobileNav, setMobileNav] = useState(false)
   const [darkMode, setDarkMode] = useState(true)
   const [goTop, setGoTop] = useState(false)
@@ -26,6 +26,10 @@ export function DashboardLayout() {
     onScroll()
     return () => el.removeEventListener('scroll', onScroll)
   }, [])
+
+  if (profileLoaded && profile?.role === 'admin') {
+    return <Navigate to="/admin" replace />
+  }
 
   return (
     <div
