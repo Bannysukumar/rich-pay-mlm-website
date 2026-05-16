@@ -25,6 +25,8 @@ import { cn } from '@/lib/utils/cn'
 type Row = {
   id: string
   userId: string
+  /** Member-submitted USDT BEP-20 payout address at request time. */
+  address: string
   amountGross: number
   fee: number
   amountNet: number
@@ -126,6 +128,7 @@ export function AdminWithdrawalsPage() {
           next.push({
             id: d.id,
             userId: String(x.userId ?? ''),
+            address: String(x.address ?? x.walletAddress ?? x.usdtAddress ?? '').trim(),
             amountGross: Number(x.amountGross ?? x.amount ?? 0),
             fee: Number(x.fee ?? 0),
             amountNet: Number(x.amountNet ?? x.net ?? 0),
@@ -159,6 +162,7 @@ export function AdminWithdrawalsPage() {
         if (username.includes(qq) || fullName.includes(qq) || email.includes(qq) || phone.includes(qq)) return true
         if (r.userId.toLowerCase().includes(qq)) return true
         if (r.id.toLowerCase().includes(qq)) return true
+        if (r.address.toLowerCase().includes(qq)) return true
         return false
       })
     }
@@ -178,6 +182,7 @@ export function AdminWithdrawalsPage() {
       'Email',
       'Phone',
       'User UID',
+      'Payout wallet address',
       'Amount gross USDT',
       'Fee USDT',
       'Amount net USDT',
@@ -194,6 +199,7 @@ export function AdminWithdrawalsPage() {
         p?.email ?? '',
         p?.phone ?? '',
         w.userId,
+        w.address,
         w.amountGross.toFixed(2),
         w.fee.toFixed(2),
         w.amountNet.toFixed(2),
@@ -244,7 +250,7 @@ export function AdminWithdrawalsPage() {
 
   const filterKeys = ['all', 'pending', 'processing', 'approved', 'rejected', 'paid'] as const
 
-  const colSpan = 11
+  const colSpan = 12
 
   const actionCell = (w: Row) => {
     const hasTx = Boolean(txHash.trim())
@@ -331,7 +337,7 @@ export function AdminWithdrawalsPage() {
             placeholder="e.g. Jane Doe, dfhgrug, or user@mail.com"
             autoComplete="off"
           />
-          <p className="text-[10px] text-[#6b6b7c]">Also matches user UID or withdrawal document id.</p>
+          <p className="text-[10px] text-[#6b6b7c]">Also matches payout wallet address, user UID, or withdrawal document id.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {filterKeys.map((key) => (
@@ -387,7 +393,7 @@ export function AdminWithdrawalsPage() {
 
       <div className="admin-panel-sheet overflow-hidden p-0">
         <div className="max-w-[100vw] overflow-x-auto">
-          <table className="w-full min-w-[1040px] text-left text-[12px] text-[#c4c4ce]">
+          <table className="w-full min-w-[1180px] text-left text-[12px] text-[#c4c4ce]">
             <thead className="border-b border-[rgba(212,175,55,0.15)] bg-[rgba(212,175,55,0.04)]">
               <tr className="text-[10px] font-bold uppercase tracking-wider text-[#6b6b7c]">
                 <th className="px-3 py-2.5 pl-4">Submitted</th>
@@ -396,6 +402,7 @@ export function AdminWithdrawalsPage() {
                 <th className="px-3 py-2.5">Email</th>
                 <th className="px-3 py-2.5">Mobile</th>
                 <th className="px-3 py-2.5">User UID</th>
+                <th className="min-w-[200px] px-3 py-2.5">Payout address</th>
                 <th className="px-3 py-2.5 text-right">Gross</th>
                 <th className="px-3 py-2.5 text-right">Net</th>
                 <th className="px-3 py-2.5">Status</th>
@@ -445,6 +452,18 @@ export function AdminWithdrawalsPage() {
                     <td className="whitespace-nowrap px-3 py-2.5 text-[11px]">{p?.phone || '—'}</td>
                     <td className="max-w-[120px] truncate px-3 py-2.5 font-mono text-[10px] text-[#9898a8]" title={w.userId}>
                       {w.userId}
+                    </td>
+                    <td className="max-w-[220px] px-3 py-2.5 align-top">
+                      {w.address ? (
+                        <span
+                          className="block break-all font-mono text-[10px] leading-snug text-[#e4e4e7]"
+                          title={w.address}
+                        >
+                          {w.address}
+                        </span>
+                      ) : (
+                        <span className="text-[#6b6b7c]">—</span>
+                      )}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold text-[#e4e4e7]">
                       {w.amountGross.toFixed(2)}
