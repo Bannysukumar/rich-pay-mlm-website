@@ -2329,6 +2329,11 @@ exports.adminSeedCompensationDefaults = (0, https_1.onCall)(callableRuntimeOpts,
         withdrawDefaultsApplied,
     };
 });
+/** Sunday (IST) — no daily ROI or team-level share from that run. */
+function isSundayIst(now = new Date()) {
+    const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'long' }).format(now);
+    return wd === 'Sunday';
+}
 /** Daily ROI accrual at 00:00 India Standard Time (Asia/Kolkata, UTC+5:30). */
 exports.processDailyRoi = (0, scheduler_1.onSchedule)({
     schedule: '0 0 * * *',
@@ -2339,6 +2344,9 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
 }, async () => {
     const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get();
     if (settingsSnap.exists && settingsSnap.data()?.roiEnabled === false) {
+        return;
+    }
+    if (isSundayIst()) {
         return;
     }
     const now = firestore_1.Timestamp.now();

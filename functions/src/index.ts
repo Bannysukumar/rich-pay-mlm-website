@@ -2655,6 +2655,12 @@ export const adminSeedCompensationDefaults = onCall(callableRuntimeOpts, async (
   }
 })
 
+/** Sunday (IST) — no daily ROI or team-level share from that run. */
+function isSundayIst(now: Date = new Date()): boolean {
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'long' }).format(now)
+  return wd === 'Sunday'
+}
+
 /** Daily ROI accrual at 00:00 India Standard Time (Asia/Kolkata, UTC+5:30). */
 export const processDailyRoi = onSchedule(
   {
@@ -2667,6 +2673,9 @@ export const processDailyRoi = onSchedule(
   async () => {
   const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get()
   if (settingsSnap.exists && settingsSnap.data()?.roiEnabled === false) {
+    return
+  }
+  if (isSundayIst()) {
     return
   }
   const now = Timestamp.now()
