@@ -87,6 +87,10 @@
         "function": { "functionName": "adminAdjustMemberBalances", "region": "us-central1" }
       },
       {
+        "source": "/api/call/adminUpdateMemberContact",
+        "function": { "functionName": "adminUpdateMemberContact", "region": "us-central1" }
+      },
+      {
         "source": "/api/call/adminDeleteMember",
         "function": { "functionName": "adminDeleteMember", "region": "us-central1" }
       },

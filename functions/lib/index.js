@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.adminDeleteMember = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.requestPasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
+exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.requestPasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
 const node_crypto_1 = require("node:crypto");
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -2144,6 +2144,93 @@ exports.adminAdjustMemberBalances = (0, https_1.onCall)(callableRuntimeOpts, asy
     });
     await audit(actorUid, 'adminAdjustMemberBalances', { userId, field, delta });
     return { ok: true };
+});
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/**
+ * Admin-only: update a member's login email and/or mobile (`phone` + `phoneIndex` + Firebase Auth).
+ */
+exports.adminUpdateMemberContact = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
+    if (!request.auth?.uid)
+        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
+    const actorUid = request.auth.uid;
+    await assertFirestoreAdmin(actorUid);
+    const data = request.data;
+    const userId = String(data.userId ?? '').trim();
+    const emailRaw = data.email !== undefined && data.email !== null ? String(data.email).trim() : undefined;
+    const phoneRaw = data.phone !== undefined && data.phone !== null ? String(data.phone).trim() : undefined;
+    if (!userId)
+        throw new https_1.HttpsError('invalid-argument', 'userId is required');
+    if (emailRaw === undefined && phoneRaw === undefined) {
+        throw new https_1.HttpsError('invalid-argument', 'Provide email and/or phone to update');
+    }
+    const email = emailRaw !== undefined ? emailRaw.toLowerCase() : undefined;
+    const phone = phoneRaw !== undefined ? phoneRaw.replace(/\s+/g, '') : undefined;
+    if (email !== undefined) {
+        if (!email || !EMAIL_RE.test(email)) {
+            throw new https_1.HttpsError('invalid-argument', 'Enter a valid email address');
+        }
+    }
+    if (phone !== undefined) {
+        if (!phone || phone.length < 8) {
+            throw new https_1.HttpsError('invalid-argument', 'Enter a valid mobile number (at least 8 digits)');
+        }
+    }
+    const uRef = db.collection(COL_USERS).doc(userId);
+    let emailChanged = false;
+    let phoneChanged = false;
+    let username = '';
+    await db.runTransaction(async (tx) => {
+        const uSnap = await tx.get(uRef);
+        if (!uSnap.exists)
+            throw new https_1.HttpsError('not-found', 'User not found');
+        const cur = uSnap.data();
+        username = String(cur.username ?? '').trim();
+        const oldEmail = String(cur.email ?? '').trim().toLowerCase();
+        const oldPhone = String(cur.phone ?? '').trim();
+        const patch = { updatedAt: Date.now() };
+        if (email !== undefined && email !== oldEmail) {
+            emailChanged = true;
+            patch.email = email;
+        }
+        if (phone !== undefined && phone !== oldPhone) {
+            phoneChanged = true;
+            patch.phone = phone;
+            const newPhoneRef = db.collection(COL_PHONE).doc(phone);
+            const newPhoneSnap = await tx.get(newPhoneRef);
+            if (newPhoneSnap.exists && String(newPhoneSnap.data()?.uid ?? '') !== userId) {
+                throw new https_1.HttpsError('already-exists', 'That mobile number is already registered');
+            }
+            let oldPhoneSnap = null;
+            if (oldPhone.length > 0) {
+                oldPhoneSnap = await tx.get(db.collection(COL_PHONE).doc(oldPhone));
+            }
+            tx.set(db.collection(COL_PHONE).doc(phone), { uid: userId });
+            if (oldPhone.length > 0 && oldPhoneSnap?.exists && String(oldPhoneSnap.data()?.uid ?? '') === userId) {
+                tx.delete(db.collection(COL_PHONE).doc(oldPhone));
+            }
+        }
+        if (!emailChanged && !phoneChanged) {
+            throw new https_1.HttpsError('failed-precondition', 'Email and phone are unchanged');
+        }
+        tx.update(uRef, patch);
+        if (emailChanged && username.length > 0) {
+            tx.set(db.collection(COL_USERS_BY_UN).doc(username), { authEmail: email }, { merge: true });
+        }
+    });
+    if (emailChanged && email) {
+        try {
+            await admin.auth().updateUser(userId, { email });
+        }
+        catch (e) {
+            const code = e && typeof e === 'object' && 'code' in e ? String(e.code) : '';
+            if (code.includes('email-already-exists')) {
+                throw new https_1.HttpsError('already-exists', 'Email already in use by another account');
+            }
+            throw new https_1.HttpsError('internal', 'Could not update Firebase Auth email');
+        }
+    }
+    await audit(actorUid, 'adminUpdateMemberContact', { userId, emailChanged, phoneChanged });
+    return { ok: true, emailChanged, phoneChanged };
 });
 /**
  * Permanently remove a member: `users/{uid}`, `usersByUsername/{username}`, matching `phoneIndex`,

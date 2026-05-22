@@ -33,6 +33,7 @@ import { AdminTeamLevelsPage } from '@/features/admin/pages/AdminTeamLevelsPage'
 import { AdminTicketsPage } from '@/features/admin/pages/AdminTicketsPage'
 import { AdminTransferSettingsPage } from '@/features/admin/pages/AdminTransferSettingsPage'
 import { AdminMemberBalanceAdjustPage } from '@/features/admin/pages/AdminMemberBalanceAdjustPage'
+import { AdminMemberContactPage } from '@/features/admin/pages/AdminMemberContactPage'
 import { AdminMemberInvestmentPlansPage } from '@/features/admin/pages/AdminMemberInvestmentPlansPage'
 import { AdminUsersPage } from '@/features/admin/pages/AdminUsersPage'
 import { AdminWalletSettingsPage } from '@/features/admin/pages/AdminWalletSettingsPage'
@@ -185,6 +186,7 @@ export function AppRouter() {
         <Route path="registrations-today" element={<AdminRegistrationsTodayPage />} />
         <Route path="member-investment-plans" element={<AdminMemberInvestmentPlansPage />} />
         <Route path="member-balance-adjust" element={<AdminMemberBalanceAdjustPage />} />
+        <Route path="member-contact" element={<AdminMemberContactPage />} />
         <Route path="deposits" element={<AdminDepositsPage />} />
         <Route path="withdrawals" element={<AdminWithdrawalsPage />} />
         <Route path="packages" element={<AdminPackagesPage />} />
