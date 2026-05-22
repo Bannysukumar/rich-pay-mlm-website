@@ -2459,7 +2459,10 @@ function tierProgressPercent(tier, qualifyingDirectCount, memberPrincipal, membe
     let joinPct = 1;
     if (minAmt > 0)
         joinPct = memberJoinMet ? 1 : Math.min(1, memberPrincipal / minAmt);
-    return Math.round(100 * (directPct * 0.5 + joinPct * 0.5));
+    else if (!memberJoinMet)
+        joinPct = 0;
+    /** Overall = slowest requirement (both must be 100% to complete). */
+    return Math.round(100 * Math.min(directPct, joinPct));
 }
 /** Member dashboard: referral promo progress for the active in-window campaign. */
 exports.getReferralCampaignProgress = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {

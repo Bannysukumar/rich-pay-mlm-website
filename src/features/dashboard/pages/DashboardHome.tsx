@@ -24,6 +24,7 @@ import {
   mergeWithdrawPolicy,
 } from '@/lib/withdrawPolicy'
 import { isLiveActivePackage } from '@/lib/activePackagesDisplay'
+import { referralTierBarHud } from '@/lib/referralCampaignProgress'
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
@@ -644,42 +645,80 @@ export function DashboardHome() {
             Promo ends {new Date(campaignProgress.campaign.endAt).toLocaleString()}
           </p>
           {campaignProgress.tiers.map((tier) => {
-            const joinLine =
-              tier.minMemberPackageAmount != null && tier.minMemberPackageAmount > 0
-                ? tier.memberJoinMet
-                  ? `Join $${fmt(tier.minMemberPackageAmount)}+ met`
-                  : `Join: $${fmt(tier.memberPrincipal)} / $${fmt(tier.minMemberPackageAmount)} active package`
-                : tier.memberJoinMet
-                  ? 'Package requirement met'
-                  : 'Activate a package to qualify'
+            const bars = referralTierBarHud(tier)
+            const barFill = tier.completed ? '#5cb85c' : '#d4af37'
+            const barBg = tier.completed
+              ? 'linear-gradient(90deg,#5cb85c,#3d8b3d)'
+              : 'linear-gradient(90deg,#d4af37,#8b6914)'
+            const ProgressRow = ({
+              label,
+              percent,
+              right,
+            }: {
+              label: string
+              percent: number
+              right: string
+            }) => (
+              <div className="mb-2">
+                <div className="d-flex flex-wrap justify-content-between gap-1 mb-1">
+                  <span className="small" style={{ color: '#bbb' }}>
+                    {label}
+                  </span>
+                  <span className="small" style={{ color: '#aaa' }}>
+                    {right}
+                  </span>
+                </div>
+                <div style={{ height: 8, background: '#333', borderRadius: 4, overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${Math.min(100, Math.max(0, percent))}%`,
+                      height: '100%',
+                      background: barBg,
+                    }}
+                  />
+                </div>
+              </div>
+            )
             return (
-              <div key={tier.tierId} className="mb-4">
-                <div className="d-flex flex-wrap justify-content-between gap-2 mb-1">
-                  <strong style={{ color: tier.completed ? '#5cb85c' : '#f5f5f5' }}>
+              <div
+                key={tier.tierId}
+                className="mb-4 pb-3 border-bottom border-secondary"
+                style={{ borderColor: 'rgba(255,255,255,0.08)' }}
+              >
+                <div className="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                  <strong style={{ color: tier.completed ? barFill : '#f5f5f5' }}>
                     {tier.rewardSubtitle ? `${tier.rewardSubtitle} → ` : ''}
                     {tier.rewardLabel}
                     {tier.completed ? ' ✓' : ''}
                   </strong>
-                  <span className="small" style={{ color: '#aaa' }}>
-                    {tier.qualifyingDirectCount} / {tier.requiredDirectReferrals} direct referrals
-                  </span>
+                  {!tier.completed ? (
+                    <span className="small" style={{ color: '#aaa' }}>
+                      {bars.overallPercent}% complete
+                    </span>
+                  ) : null}
                 </div>
-                <div className="mb-2" style={{ height: 8, background: '#333', borderRadius: 4, overflow: 'hidden' }}>
-                  <div
-                    style={{
-                      width: `${Math.min(100, Math.max(0, tier.progressPercent))}%`,
-                      height: '100%',
-                      background: tier.completed
-                        ? 'linear-gradient(90deg,#5cb85c,#3d8b3d)'
-                        : 'linear-gradient(90deg,#d4af37,#8b6914)',
-                    }}
+                {bars.showJoinBar ? (
+                  <ProgressRow
+                    label={
+                      tier.minMemberPackageAmount != null && tier.minMemberPackageAmount > 0
+                        ? `Join package ($${fmt(tier.minMemberPackageAmount)}+)`
+                        : 'Active package'
+                    }
+                    percent={bars.joinPercent}
+                    right={tier.memberJoinMet ? 'Done' : `${bars.joinPercent}%`}
                   />
-                </div>
-                <p className="small mb-0" style={{ color: '#ccc' }}>
-                  {joinLine}
-                  {!tier.completed && tier.progressPercent < 100
-                    ? ` · ${tier.progressPercent}% toward this reward`
-                    : null}
+                ) : null}
+                <ProgressRow
+                  label="Direct referrals (campaign window)"
+                  percent={bars.directPercent}
+                  right={`${tier.qualifyingDirectCount} / ${tier.requiredDirectReferrals}`}
+                />
+                <p className="small mb-0 mt-1" style={{ color: '#888' }}>
+                  {tier.completed
+                    ? 'Reward requirements completed.'
+                    : tier.memberJoinMet
+                      ? 'Package OK — invite more direct referrals who join in the promo period with an active package.'
+                      : 'Complete your package and direct referral targets to unlock this reward.'}
                 </p>
               </div>
             )
