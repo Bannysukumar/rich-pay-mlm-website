@@ -6,7 +6,12 @@ import { CopySimple, Link as LinkIcon } from '@phosphor-icons/react'
 import toast from 'react-hot-toast'
 import { useAuthState } from '@/hooks/useAuth'
 import { useSiteSettings } from '@/hooks/useSiteSettings'
-import type { UserProfile } from '@/types/models'
+import { getCallableErrorMessage } from '@/lib/api/callableErrorMessage'
+import {
+  dismissReferralCampaignBannerCallable,
+  getReferralCampaignProgressCallable,
+} from '@/lib/api/referralCampaignCallables'
+import type { ReferralCampaignProgressResult, UserProfile } from '@/types/models'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 import {
@@ -166,12 +171,31 @@ export function DashboardHome() {
   const [maxActivePrincipal, setMaxActivePrincipal] = useState<number | undefined>(undefined)
   const [pkgIncomeRows, setPkgIncomeRows] = useState<PkgIncomeRow[]>([])
   const [clockTick, setClockTick] = useState(0)
+  const [campaignProgress, setCampaignProgress] = useState<ReferralCampaignProgressResult | null>(null)
 
   const refLink = useMemo(() => {
     if (!profile?.username) return ''
     const base = referralBase()
     return `${base}/register?ref=${profile.username}`
   }, [profile?.username])
+
+  useEffect(() => {
+    if (!firebaseUid) {
+      setCampaignProgress(null)
+      return
+    }
+    let cancelled = false
+    void getReferralCampaignProgressCallable()
+      .then((res) => {
+        if (!cancelled) setCampaignProgress(res)
+      })
+      .catch(() => {
+        if (!cancelled) setCampaignProgress(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [firebaseUid])
 
   useEffect(() => {
     if (!firebaseUid) {
@@ -272,6 +296,24 @@ export function DashboardHome() {
       deriveNewSchemaIncomeHud(pkgIncomeRows, profile?.totalWorkingIncome ?? 0),
     [pkgIncomeRows, profile?.totalWorkingIncome],
   )
+
+  const showCampaignBanner = useMemo(() => {
+    const c = campaignProgress?.campaign
+    if (!c?.bannerEnabled || !c.bannerMessage.trim()) return false
+    const dismissed = profile?.dismissedReferralCampaignBanners?.[c.id] ?? 0
+    return dismissed < (c.bannerDismissVersion ?? 0)
+  }, [campaignProgress, profile?.dismissedReferralCampaignBanners])
+
+  const dismissCampaignBanner = async () => {
+    const id = campaignProgress?.campaign?.id
+    if (!id) return
+    try {
+      await dismissReferralCampaignBannerCallable(id)
+      toast.success('Banner dismissed')
+    } catch (err) {
+      toast.error(getCallableErrorMessage(err) || 'Could not dismiss banner')
+    }
+  }
 
   const copy = async () => {
     if (!refLink) return
@@ -407,6 +449,41 @@ export function DashboardHome() {
         </div>
       </div>
 
+      {showCampaignBanner && campaignProgress?.campaign ? (
+        <div className="row mb-4">
+          <div className="col-12">
+            <div
+              className="position-relative rounded-3 border p-4"
+              style={{
+                borderColor: 'rgba(212,175,55,0.45)',
+                background: 'linear-gradient(135deg, rgba(212,175,55,0.12) 0%, rgba(20,20,20,0.95) 60%)',
+              }}
+            >
+              <button
+                type="button"
+                className="btn-close btn-close-white position-absolute top-0 end-0 m-3"
+                aria-label="Dismiss"
+                onClick={() => void dismissCampaignBanner()}
+              />
+              {campaignProgress.campaign.bannerImageUrl ? (
+                <img
+                  src={campaignProgress.campaign.bannerImageUrl}
+                  alt=""
+                  className="mb-3 rounded"
+                  style={{ maxHeight: 120, objectFit: 'cover', width: '100%' }}
+                />
+              ) : null}
+              <h3 className="mb-2" style={{ color: '#d4af37', fontWeight: 600 }}>
+                {campaignProgress.campaign.bannerTitle || campaignProgress.campaign.title}
+              </h3>
+              <p className="mb-0" style={{ color: '#ddd' }}>
+                {campaignProgress.campaign.bannerMessage}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="row mb-4">
         <div className="col-12">
           <div className="referral-card">
@@ -534,6 +611,63 @@ export function DashboardHome() {
       <div className="mt-2">
         <StatGrid items={row4} />
       </div>
+
+      {campaignProgress?.campaign && (campaignProgress.tiers?.length ?? 0) > 0 ? (
+        <section className="mt-4 mb-4 rounded-3 border border-secondary p-4" style={{ borderColor: 'rgba(212,175,55,0.2)' }}>
+          <h3 className="mb-1" style={{ color: '#d4af37', fontWeight: 600 }}>
+            {campaignProgress.campaign.title}
+          </h3>
+          {campaignProgress.campaign.subtitle ? (
+            <p className="small mb-3" style={{ color: '#aaa' }}>
+              {campaignProgress.campaign.subtitle}
+            </p>
+          ) : null}
+          <p className="small mb-3" style={{ color: '#888' }}>
+            Promo ends {new Date(campaignProgress.campaign.endAt).toLocaleString()}
+          </p>
+          {campaignProgress.tiers.map((tier) => {
+            const joinLine =
+              tier.minMemberPackageAmount != null && tier.minMemberPackageAmount > 0
+                ? tier.memberJoinMet
+                  ? `Join $${fmt(tier.minMemberPackageAmount)}+ met`
+                  : `Join: $${fmt(tier.memberPrincipal)} / $${fmt(tier.minMemberPackageAmount)} active package`
+                : tier.memberJoinMet
+                  ? 'Package requirement met'
+                  : 'Activate a package to qualify'
+            return (
+              <div key={tier.tierId} className="mb-4">
+                <div className="d-flex flex-wrap justify-content-between gap-2 mb-1">
+                  <strong style={{ color: tier.completed ? '#5cb85c' : '#f5f5f5' }}>
+                    {tier.rewardSubtitle ? `${tier.rewardSubtitle} → ` : ''}
+                    {tier.rewardLabel}
+                    {tier.completed ? ' ✓' : ''}
+                  </strong>
+                  <span className="small" style={{ color: '#aaa' }}>
+                    {tier.qualifyingDirectCount} / {tier.requiredDirectReferrals} direct referrals
+                  </span>
+                </div>
+                <div className="mb-2" style={{ height: 8, background: '#333', borderRadius: 4, overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${Math.min(100, Math.max(0, tier.progressPercent))}%`,
+                      height: '100%',
+                      background: tier.completed
+                        ? 'linear-gradient(90deg,#5cb85c,#3d8b3d)'
+                        : 'linear-gradient(90deg,#d4af37,#8b6914)',
+                    }}
+                  />
+                </div>
+                <p className="small mb-0" style={{ color: '#ccc' }}>
+                  {joinLine}
+                  {!tier.completed && tier.progressPercent < 100
+                    ? ` · ${tier.progressPercent}% toward this reward`
+                    : null}
+                </p>
+              </div>
+            )
+          })}
+        </section>
+      ) : null}
 
       {rankHud ? (
         <section className="mt-4 mb-5 rounded-3 border border-secondary p-4" style={{ borderColor: 'rgba(212,175,55,0.2)' }}>

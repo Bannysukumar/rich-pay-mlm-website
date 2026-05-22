@@ -62,6 +62,8 @@ export interface UserProfile {
   usdtBep20Address?: string
   /** True if server has a transaction PIN hash set */
   transactionPinSet?: boolean
+  /** campaignId → dismissed banner version (dashboard promo). */
+  dismissedReferralCampaignBanners?: Record<string, number>
   createdAt: number
   updatedAt: number
 }
@@ -263,4 +265,61 @@ export interface SiteSettings {
   publicContactHeroSub?: string
   /** Optional footer blurb column on `/contact`. */
   publicContactFooterNote?: string
+}
+
+/** One reward tier inside a referral promo campaign (e.g. flyer). */
+export interface ReferralCampaignTier {
+  id: string
+  sortOrder: number
+  rewardLabel: string
+  /** Marketing line, e.g. "$200 Join". */
+  rewardSubtitle?: string
+  /** Member must have active package principal ≥ this (e.g. 200, 300). */
+  minMemberPackageAmount?: number
+  requiredDirectReferrals: number
+  requireMemberActivePackage?: boolean
+  requireDirectActivePackage?: boolean
+  /** Count only directs who registered between campaign start and end. */
+  directMustRegisterInCampaignWindow?: boolean
+}
+
+/** Admin-managed referral reward campaign (`referralCampaigns` collection). */
+export interface ReferralCampaign {
+  id: string
+  title: string
+  subtitle?: string
+  theme?: string
+  active: boolean
+  startAt: number
+  endAt: number
+  tiers: ReferralCampaignTier[]
+  bannerEnabled: boolean
+  bannerTitle?: string
+  bannerMessage: string
+  bannerImageUrl?: string
+  /** Bump when admin changes banner so dismissed users see it again. */
+  bannerDismissVersion: number
+  updatedAt: number
+}
+
+/** Callable `getReferralCampaignProgress` tier row. */
+export interface ReferralCampaignTierProgress {
+  tierId: string
+  sortOrder: number
+  rewardLabel: string
+  rewardSubtitle?: string
+  minMemberPackageAmount?: number
+  requiredDirectReferrals: number
+  qualifyingDirectCount: number
+  memberPrincipal: number
+  memberJoinMet: boolean
+  completed: boolean
+  progressPercent: number
+}
+
+export interface ReferralCampaignProgressResult {
+  campaign: ReferralCampaign | null
+  qualifyingDirectCount: number
+  memberPrincipal: number
+  tiers: ReferralCampaignTierProgress[]
 }

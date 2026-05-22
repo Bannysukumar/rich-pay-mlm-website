@@ -21,11 +21,16 @@ service cloud.firestore {
     }
 
     // --- Users ---
+    function onlyReferralBannerDismiss() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['dismissedReferralCampaignBanners', 'updatedAt']);
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
       allow create, delete: if false;
       // Members update profiles via Callable only; admins may manage member records here.
-      allow update: if isAdmin();
+      allow update: if isAdmin() || (isOwner(userId) && onlyReferralBannerDismiss());
     }
 
     match /usersByUsername/{username} {
@@ -70,6 +75,11 @@ service cloud.firestore {
 
     match /ranks/{id} {
       allow read: if isAdmin() || resource.data.active == true;
+      allow write: if isAdmin();
+    }
+
+    match /referralCampaigns/{id} {
+      allow read: if isSignedIn();
       allow write: if isAdmin();
     }
 

@@ -66,6 +66,7 @@ function enforcePackageTopupDirectReferralOnly(settings: Record<string, unknown>
 }
 const COL_TEAM_LEVELS = 'teamLevels'
 const COL_RANKS = 'ranks'
+const COL_REFERRAL_CAMPAIGNS = 'referralCampaigns'
 
 const REFERENCE_WITHDRAW_PACKAGE_CAPS_SEED = [
   { packageAmount: 100, maxWithdrawal: 20, usePercentFormula: false, percentOfPackage: 20, active: true, sortOrder: 10 },
@@ -2687,6 +2688,181 @@ export const adminDeleteMember = onCall(callableRuntimeOpts, async (request) => 
 
   await audit(actorUid, 'adminDeleteMember', { deletedUid: targetUid, username, phone: phone || undefined })
   return { ok: true }
+})
+
+type ReferralCampaignTierRow = {
+  id: string
+  sortOrder: number
+  rewardLabel: string
+  rewardSubtitle?: string
+  minMemberPackageAmount?: number
+  requiredDirectReferrals: number
+  requireMemberActivePackage?: boolean
+  requireDirectActivePackage?: boolean
+  directMustRegisterInCampaignWindow?: boolean
+}
+
+function mapReferralCampaignDoc(id: string, data: Record<string, unknown>) {
+  const tiersRaw = Array.isArray(data.tiers) ? data.tiers : []
+  const tiers: ReferralCampaignTierRow[] = tiersRaw
+    .map((t, i) => {
+      const row = t as Record<string, unknown>
+      return {
+        id: String(row.id ?? `tier-${i + 1}`),
+        sortOrder: Number(row.sortOrder ?? (i + 1) * 10),
+        rewardLabel: String(row.rewardLabel ?? ''),
+        rewardSubtitle: row.rewardSubtitle != null ? String(row.rewardSubtitle) : undefined,
+        minMemberPackageAmount:
+          row.minMemberPackageAmount != null ? Number(row.minMemberPackageAmount) : undefined,
+        requiredDirectReferrals: Math.max(1, Number(row.requiredDirectReferrals ?? 10)),
+        requireMemberActivePackage: row.requireMemberActivePackage !== false,
+        requireDirectActivePackage: row.requireDirectActivePackage !== false,
+        directMustRegisterInCampaignWindow: row.directMustRegisterInCampaignWindow !== false,
+      }
+    })
+    .filter((t) => t.rewardLabel.length > 0)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+  return {
+    id,
+    title: String(data.title ?? 'Referral rewards'),
+    subtitle: data.subtitle != null ? String(data.subtitle) : undefined,
+    theme: data.theme != null ? String(data.theme) : undefined,
+    active: data.active === true,
+    startAt: Number(data.startAt ?? 0),
+    endAt: Number(data.endAt ?? 0),
+    tiers,
+    bannerEnabled: data.bannerEnabled !== false,
+    bannerTitle: data.bannerTitle != null ? String(data.bannerTitle) : undefined,
+    bannerMessage: String(data.bannerMessage ?? ''),
+    bannerImageUrl: data.bannerImageUrl != null ? String(data.bannerImageUrl) : undefined,
+    bannerDismissVersion: Math.max(0, Number(data.bannerDismissVersion ?? 0)),
+    updatedAt: Number(data.updatedAt ?? 0),
+  }
+}
+
+async function pickActiveReferralCampaign(now = Date.now()) {
+  const snap = await db.collection(COL_REFERRAL_CAMPAIGNS).where('active', '==', true).get()
+  const candidates = snap.docs
+    .map((d) => mapReferralCampaignDoc(d.id, d.data() as Record<string, unknown>))
+    .filter((c) => c.startAt > 0 && c.endAt > 0 && now >= c.startAt && now <= c.endAt)
+    .sort((a, b) => b.startAt - a.startAt)
+  return candidates[0] ?? null
+}
+
+async function countQualifyingDirectsForTier(
+  sponsorUid: string,
+  campaign: { startAt: number; endAt: number },
+  tier: ReferralCampaignTierRow,
+): Promise<number> {
+  const snap = await db.collection(COL_USERS).where('sponsorUid', '==', sponsorUid).get()
+  let count = 0
+  const inWindow = tier.directMustRegisterInCampaignWindow !== false
+  const requireActive = tier.requireDirectActivePackage !== false
+  for (const d of snap.docs) {
+    const data = d.data() as Record<string, unknown>
+    const created = Number(data.createdAt ?? 0)
+    if (inWindow && (created < campaign.startAt || created > campaign.endAt)) continue
+    if (requireActive && !(await hasAtLeastOneActivePackage(d.id))) continue
+    count++
+  }
+  return count
+}
+
+function memberJoinRequirementMet(
+  tier: ReferralCampaignTierRow,
+  memberPrincipal: number,
+  hasActive: boolean,
+): boolean {
+  const minAmt = Number(tier.minMemberPackageAmount ?? 0)
+  if (tier.requireMemberActivePackage !== false && !hasActive) return false
+  if (minAmt > 0 && memberPrincipal < minAmt) return false
+  return true
+}
+
+function tierProgressPercent(
+  tier: ReferralCampaignTierRow,
+  qualifyingDirectCount: number,
+  memberPrincipal: number,
+  memberJoinMet: boolean,
+): number {
+  const req = Math.max(1, tier.requiredDirectReferrals)
+  const directPct = Math.min(1, qualifyingDirectCount / req)
+  const minAmt = Number(tier.minMemberPackageAmount ?? 0)
+  let joinPct = 1
+  if (minAmt > 0) joinPct = memberJoinMet ? 1 : Math.min(1, memberPrincipal / minAmt)
+  return Math.round(100 * (directPct * 0.5 + joinPct * 0.5))
+}
+
+/** Member dashboard: referral promo progress for the active in-window campaign. */
+export const getReferralCampaignProgress = onCall(callableRuntimeOpts, async (request) => {
+  if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')
+  const uid = request.auth.uid
+  const campaign = await pickActiveReferralCampaign()
+  if (!campaign) {
+    return { campaign: null, qualifyingDirectCount: 0, memberPrincipal: 0, tiers: [] }
+  }
+  const memberPrincipal = await maxActivePrincipalForUser(uid)
+  const hasActive = await hasAtLeastOneActivePackage(uid)
+  const tiersOut = []
+  let topDirects = 0
+  for (const tier of campaign.tiers) {
+    const qualifyingDirectCount = await countQualifyingDirectsForTier(uid, campaign, tier)
+    topDirects = Math.max(topDirects, qualifyingDirectCount)
+    const memberJoinMet = memberJoinRequirementMet(tier, memberPrincipal, hasActive)
+    const completed =
+      qualifyingDirectCount >= tier.requiredDirectReferrals && memberJoinMet
+    tiersOut.push({
+      tierId: tier.id,
+      sortOrder: tier.sortOrder,
+      rewardLabel: tier.rewardLabel,
+      rewardSubtitle: tier.rewardSubtitle,
+      minMemberPackageAmount: tier.minMemberPackageAmount,
+      requiredDirectReferrals: tier.requiredDirectReferrals,
+      qualifyingDirectCount,
+      memberPrincipal,
+      memberJoinMet,
+      completed,
+      progressPercent: completed
+        ? 100
+        : tierProgressPercent(tier, qualifyingDirectCount, memberPrincipal, memberJoinMet),
+    })
+  }
+  return {
+    campaign,
+    qualifyingDirectCount: topDirects,
+    memberPrincipal,
+    tiers: tiersOut,
+  }
+})
+
+/** Persist banner dismiss on the user profile (Firestore rules block direct member writes). */
+export const dismissReferralCampaignBanner = onCall(callableRuntimeOpts, async (request) => {
+  if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')
+  const uid = request.auth.uid
+  const campaignId = String((request.data as { campaignId?: string })?.campaignId ?? '').trim()
+  if (!campaignId) throw new HttpsError('invalid-argument', 'campaignId is required')
+
+  const cSnap = await db.collection(COL_REFERRAL_CAMPAIGNS).doc(campaignId).get()
+  if (!cSnap.exists) throw new HttpsError('not-found', 'Campaign not found')
+  const version = Math.max(0, Number(cSnap.data()?.bannerDismissVersion ?? 0))
+  const uRef = db.collection(COL_USERS).doc(uid)
+
+  await db.runTransaction(async (tx) => {
+    const uSnap = await tx.get(uRef)
+    const prev =
+      uSnap.exists && uSnap.data()?.dismissedReferralCampaignBanners != null
+        ? (uSnap.data()!.dismissedReferralCampaignBanners as Record<string, number>)
+        : {}
+    tx.set(
+      uRef,
+      {
+        dismissedReferralCampaignBanners: { ...prev, [campaignId]: version },
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    )
+  })
+  return { ok: true, campaignId, version }
 })
 
 /** Push the same notification document to every user (batched). */

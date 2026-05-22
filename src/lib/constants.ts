@@ -28,4 +28,5 @@ export const COLLECTIONS = {
   seoSettings: 'seoSettings',
   auditLogs: 'auditLogs',
   phones: 'phoneIndex',
+  referralCampaigns: 'referralCampaigns',
 } as const

@@ -59,6 +59,7 @@ const groups: { title: string; items: NavItem[] }[] = [
     items: [
       { to: '/admin/roi', label: 'ROI', icon: IconPercentage },
       { to: '/admin/sponsor', label: 'Sponsor bonus', icon: IconGift },
+      { to: '/admin/referral-campaigns', label: 'Referral rewards', icon: IconAward },
       { to: '/admin/team-levels', label: 'Team levels', icon: IconHierarchy },
       { to: '/admin/ranks', label: 'Rank bonus', icon: IconAward },
     ],

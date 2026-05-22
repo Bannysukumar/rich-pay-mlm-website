@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.requestPasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
+exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.dismissReferralCampaignBanner = exports.getReferralCampaignProgress = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.requestPasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
 const node_crypto_1 = require("node:crypto");
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -86,6 +86,7 @@ function enforcePackageTopupDirectReferralOnly(settings) {
 }
 const COL_TEAM_LEVELS = 'teamLevels';
 const COL_RANKS = 'ranks';
+const COL_REFERRAL_CAMPAIGNS = 'referralCampaigns';
 const REFERENCE_WITHDRAW_PACKAGE_CAPS_SEED = [
     { packageAmount: 100, maxWithdrawal: 20, usePercentFormula: false, percentOfPackage: 20, active: true, sortOrder: 10 },
     { packageAmount: 200, maxWithdrawal: 40, usePercentFormula: false, percentOfPackage: 20, active: true, sortOrder: 20 },
@@ -2333,6 +2334,149 @@ exports.adminDeleteMember = (0, https_1.onCall)(callableRuntimeOpts, async (requ
     }
     await audit(actorUid, 'adminDeleteMember', { deletedUid: targetUid, username, phone: phone || undefined });
     return { ok: true };
+});
+function mapReferralCampaignDoc(id, data) {
+    const tiersRaw = Array.isArray(data.tiers) ? data.tiers : [];
+    const tiers = tiersRaw
+        .map((t, i) => {
+        const row = t;
+        return {
+            id: String(row.id ?? `tier-${i + 1}`),
+            sortOrder: Number(row.sortOrder ?? (i + 1) * 10),
+            rewardLabel: String(row.rewardLabel ?? ''),
+            rewardSubtitle: row.rewardSubtitle != null ? String(row.rewardSubtitle) : undefined,
+            minMemberPackageAmount: row.minMemberPackageAmount != null ? Number(row.minMemberPackageAmount) : undefined,
+            requiredDirectReferrals: Math.max(1, Number(row.requiredDirectReferrals ?? 10)),
+            requireMemberActivePackage: row.requireMemberActivePackage !== false,
+            requireDirectActivePackage: row.requireDirectActivePackage !== false,
+            directMustRegisterInCampaignWindow: row.directMustRegisterInCampaignWindow !== false,
+        };
+    })
+        .filter((t) => t.rewardLabel.length > 0)
+        .sort((a, b) => a.sortOrder - b.sortOrder);
+    return {
+        id,
+        title: String(data.title ?? 'Referral rewards'),
+        subtitle: data.subtitle != null ? String(data.subtitle) : undefined,
+        theme: data.theme != null ? String(data.theme) : undefined,
+        active: data.active === true,
+        startAt: Number(data.startAt ?? 0),
+        endAt: Number(data.endAt ?? 0),
+        tiers,
+        bannerEnabled: data.bannerEnabled !== false,
+        bannerTitle: data.bannerTitle != null ? String(data.bannerTitle) : undefined,
+        bannerMessage: String(data.bannerMessage ?? ''),
+        bannerImageUrl: data.bannerImageUrl != null ? String(data.bannerImageUrl) : undefined,
+        bannerDismissVersion: Math.max(0, Number(data.bannerDismissVersion ?? 0)),
+        updatedAt: Number(data.updatedAt ?? 0),
+    };
+}
+async function pickActiveReferralCampaign(now = Date.now()) {
+    const snap = await db.collection(COL_REFERRAL_CAMPAIGNS).where('active', '==', true).get();
+    const candidates = snap.docs
+        .map((d) => mapReferralCampaignDoc(d.id, d.data()))
+        .filter((c) => c.startAt > 0 && c.endAt > 0 && now >= c.startAt && now <= c.endAt)
+        .sort((a, b) => b.startAt - a.startAt);
+    return candidates[0] ?? null;
+}
+async function countQualifyingDirectsForTier(sponsorUid, campaign, tier) {
+    const snap = await db.collection(COL_USERS).where('sponsorUid', '==', sponsorUid).get();
+    let count = 0;
+    const inWindow = tier.directMustRegisterInCampaignWindow !== false;
+    const requireActive = tier.requireDirectActivePackage !== false;
+    for (const d of snap.docs) {
+        const data = d.data();
+        const created = Number(data.createdAt ?? 0);
+        if (inWindow && (created < campaign.startAt || created > campaign.endAt))
+            continue;
+        if (requireActive && !(await hasAtLeastOneActivePackage(d.id)))
+            continue;
+        count++;
+    }
+    return count;
+}
+function memberJoinRequirementMet(tier, memberPrincipal, hasActive) {
+    const minAmt = Number(tier.minMemberPackageAmount ?? 0);
+    if (tier.requireMemberActivePackage !== false && !hasActive)
+        return false;
+    if (minAmt > 0 && memberPrincipal < minAmt)
+        return false;
+    return true;
+}
+function tierProgressPercent(tier, qualifyingDirectCount, memberPrincipal, memberJoinMet) {
+    const req = Math.max(1, tier.requiredDirectReferrals);
+    const directPct = Math.min(1, qualifyingDirectCount / req);
+    const minAmt = Number(tier.minMemberPackageAmount ?? 0);
+    let joinPct = 1;
+    if (minAmt > 0)
+        joinPct = memberJoinMet ? 1 : Math.min(1, memberPrincipal / minAmt);
+    return Math.round(100 * (directPct * 0.5 + joinPct * 0.5));
+}
+/** Member dashboard: referral promo progress for the active in-window campaign. */
+exports.getReferralCampaignProgress = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
+    if (!request.auth?.uid)
+        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
+    const uid = request.auth.uid;
+    const campaign = await pickActiveReferralCampaign();
+    if (!campaign) {
+        return { campaign: null, qualifyingDirectCount: 0, memberPrincipal: 0, tiers: [] };
+    }
+    const memberPrincipal = await maxActivePrincipalForUser(uid);
+    const hasActive = await hasAtLeastOneActivePackage(uid);
+    const tiersOut = [];
+    let topDirects = 0;
+    for (const tier of campaign.tiers) {
+        const qualifyingDirectCount = await countQualifyingDirectsForTier(uid, campaign, tier);
+        topDirects = Math.max(topDirects, qualifyingDirectCount);
+        const memberJoinMet = memberJoinRequirementMet(tier, memberPrincipal, hasActive);
+        const completed = qualifyingDirectCount >= tier.requiredDirectReferrals && memberJoinMet;
+        tiersOut.push({
+            tierId: tier.id,
+            sortOrder: tier.sortOrder,
+            rewardLabel: tier.rewardLabel,
+            rewardSubtitle: tier.rewardSubtitle,
+            minMemberPackageAmount: tier.minMemberPackageAmount,
+            requiredDirectReferrals: tier.requiredDirectReferrals,
+            qualifyingDirectCount,
+            memberPrincipal,
+            memberJoinMet,
+            completed,
+            progressPercent: completed
+                ? 100
+                : tierProgressPercent(tier, qualifyingDirectCount, memberPrincipal, memberJoinMet),
+        });
+    }
+    return {
+        campaign,
+        qualifyingDirectCount: topDirects,
+        memberPrincipal,
+        tiers: tiersOut,
+    };
+});
+/** Persist banner dismiss on the user profile (Firestore rules block direct member writes). */
+exports.dismissReferralCampaignBanner = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
+    if (!request.auth?.uid)
+        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
+    const uid = request.auth.uid;
+    const campaignId = String(request.data?.campaignId ?? '').trim();
+    if (!campaignId)
+        throw new https_1.HttpsError('invalid-argument', 'campaignId is required');
+    const cSnap = await db.collection(COL_REFERRAL_CAMPAIGNS).doc(campaignId).get();
+    if (!cSnap.exists)
+        throw new https_1.HttpsError('not-found', 'Campaign not found');
+    const version = Math.max(0, Number(cSnap.data()?.bannerDismissVersion ?? 0));
+    const uRef = db.collection(COL_USERS).doc(uid);
+    await db.runTransaction(async (tx) => {
+        const uSnap = await tx.get(uRef);
+        const prev = uSnap.exists && uSnap.data()?.dismissedReferralCampaignBanners != null
+            ? uSnap.data().dismissedReferralCampaignBanners
+            : {};
+        tx.set(uRef, {
+            dismissedReferralCampaignBanners: { ...prev, [campaignId]: version },
+            updatedAt: Date.now(),
+        }, { merge: true });
+    });
+    return { ok: true, campaignId, version };
 });
 /** Push the same notification document to every user (batched). */
 exports.adminBroadcastNotification = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {

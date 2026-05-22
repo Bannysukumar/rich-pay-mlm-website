@@ -79,6 +79,15 @@ function mapUserDoc(uid: string, data: Record<string, unknown>): UserProfile {
     city: data.city != null ? String(data.city) : undefined,
     usdtBep20Address: data.usdtBep20Address != null ? String(data.usdtBep20Address) : undefined,
     transactionPinSet: Boolean(data.transactionPinHash),
+    dismissedReferralCampaignBanners:
+      data.dismissedReferralCampaignBanners != null && typeof data.dismissedReferralCampaignBanners === 'object'
+        ? Object.fromEntries(
+            Object.entries(data.dismissedReferralCampaignBanners as Record<string, unknown>).map(([k, v]) => [
+              k,
+              Number(v),
+            ]),
+          )
+        : undefined,
     createdAt: Number(data.createdAt ?? 0),
     updatedAt: Number(data.updatedAt ?? 0),
   }
