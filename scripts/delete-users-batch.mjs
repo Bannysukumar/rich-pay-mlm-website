@@ -4,7 +4,9 @@
  *
  * Usage:
  *   node scripts/delete-users-batch.mjs <service-account.json> [--execute] [--force-admin]
+ *   node scripts/delete-users-batch.mjs --use-adc [--execute] [--force-admin]
  *
+ * Cloud Shell: omit the JSON and pass --use-adc (uses your logged-in gcloud account).
  * Edit USER_IDS below or pass IDs as extra args after the key path.
  */
 
@@ -39,20 +41,28 @@ const COL_INTERNAL = 'internalTransfers'
 const argv = process.argv.slice(2)
 const EXECUTE = argv.includes('--execute')
 const FORCE_ADMIN = argv.includes('--force-admin')
-const filtered = argv.filter((a) => a !== '--execute' && a !== '--force-admin')
+const USE_ADC = argv.includes('--use-adc')
+const filtered = argv.filter((a) => a !== '--execute' && a !== '--force-admin' && a !== '--use-adc')
 const [keyPath, ...extraIds] = filtered
 
-if (!keyPath || keyPath.includes('-h')) {
+if ((!keyPath && !USE_ADC) || keyPath === '-h' || keyPath === '--help') {
   console.error(
     'Usage: node scripts/delete-users-batch.mjs <service-account.json> [userId ...] [--execute] [--force-admin]',
+  )
+  console.error(
+    '       node scripts/delete-users-batch.mjs --use-adc [userId ...] [--execute] [--force-admin]',
   )
   process.exit(1)
 }
 
 const USER_IDS = [...new Set((extraIds.length ? extraIds : DEFAULT_USER_IDS).map((x) => String(x).trim()))]
 
-const sa = JSON.parse(fs.readFileSync(keyPath, 'utf8'))
-admin.initializeApp({ credential: admin.credential.cert(sa) })
+if (USE_ADC) {
+  admin.initializeApp({ credential: admin.credential.applicationDefault() })
+} else {
+  const sa = JSON.parse(fs.readFileSync(keyPath, 'utf8'))
+  admin.initializeApp({ credential: admin.credential.cert(sa) })
+}
 const db = admin.firestore()
 const auth = admin.auth()
 
