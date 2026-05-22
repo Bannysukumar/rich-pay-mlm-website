@@ -25,6 +25,11 @@ import {
 } from '@/lib/withdrawPolicy'
 import { isLiveActivePackage } from '@/lib/activePackagesDisplay'
 import { referralTierBarHud } from '@/lib/referralCampaignProgress'
+import {
+  openReferralWhatsappShare,
+  referralWhatsappImageUrl,
+  referralWhatsappShareFromSettings,
+} from '@/lib/referralShareMessage'
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
@@ -328,25 +333,12 @@ export function DashboardHome() {
     toast.success('Referral link copied')
   }
 
+  const promoImageUrl = referralWhatsappImageUrl(settings)
+
   const shareOnWhatsApp = () => {
     if (!refLink) return
-    const message =
-      `*JOIN RICHPAY & START EARNING WITH ME!*\n\n` +
-      `Hi! I'm earning passive daily income with RichPay, a premium financial growth platform.\n\n` +
-      `----------------------------------------\n` +
-      `EARNING HIGHLIGHTS:\n` +
-      `----------------------------------------\n` +
-      `-> Up to 5% Daily ROI on investments\n` +
-      `-> 30-Level Referral Commission system\n` +
-      `-> Rank bonuses for qualified ranks\n` +
-      `-> 5% Instant Sponsor Reward\n\n` +
-      `----------------------------------------\n` +
-      `SIGN UP USING MY REFERRAL LINK:\n` +
-      `----------------------------------------\n\n` +
-      `${refLink}\n\n` +
-      `Start your financial freedom journey today!\n` +
-      `Let's grow together!`
-    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank')
+    const message = referralWhatsappShareFromSettings(settings, refLink)
+    void openReferralWhatsappShare(message, promoImageUrl)
   }
 
   if (!profile) {
@@ -501,6 +493,17 @@ export function DashboardHome() {
               <p className="mb-0 mt-1 small">Share this link with friends & family to start earning</p>
             </div>
             <div className="referral-body">
+              {promoImageUrl ? (
+                <div className="mb-4 text-center">
+                  <img
+                    src={promoImageUrl}
+                    alt="Referral promo"
+                    className="img-fluid rounded"
+                    style={{ maxHeight: 220, objectFit: 'contain' }}
+                  />
+                  <p className="small mt-2 mb-0 text-secondary">Optional promo image — included on share when supported</p>
+                </div>
+              ) : null}
               <div className="referral-link-box mb-4">
                 <CopySimple className="me-2" size={20} color="#d4af37" style={{ verticalAlign: 'middle' }} />
                 <Link to={refLink} target="_blank" rel="noreferrer" id="referralLink">

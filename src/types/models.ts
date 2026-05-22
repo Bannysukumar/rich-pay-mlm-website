@@ -267,6 +267,10 @@ export interface SiteSettings {
   publicContactHeroSub?: string
   /** Optional footer blurb column on `/contact`. */
   publicContactFooterNote?: string
+  /** WhatsApp referral invite text; use `{{referralLink}}` for the member’s signup URL. */
+  referralWhatsappShareTemplate?: string
+  /** Optional promo image shown on referral hub + attached on share when supported. */
+  referralWhatsappShareImageUrl?: string
 }
 
 /** One reward tier inside a referral promo campaign (e.g. flyer). */

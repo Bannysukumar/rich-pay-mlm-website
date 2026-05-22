@@ -47,6 +47,8 @@ const defaults: SiteSettings = {
   internalTransferFeePercent: 0,
   minActivationTransfer: 0,
   tickerSymbols: ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT'],
+  referralWhatsappShareTemplate: undefined,
+  referralWhatsappShareImageUrl: undefined,
 }
 
 export function useSiteSettings() {
@@ -187,6 +189,14 @@ export function useSiteSettings() {
             d.publicContactHeroSub != null ? String(d.publicContactHeroSub) : undefined,
           publicContactFooterNote:
             d.publicContactFooterNote != null ? String(d.publicContactFooterNote) : undefined,
+          referralWhatsappShareTemplate:
+            d.referralWhatsappShareTemplate != null
+              ? String(d.referralWhatsappShareTemplate)
+              : undefined,
+          referralWhatsappShareImageUrl:
+            d.referralWhatsappShareImageUrl != null
+              ? String(d.referralWhatsappShareImageUrl)
+              : undefined,
         })
         setLoaded(true)
       },
