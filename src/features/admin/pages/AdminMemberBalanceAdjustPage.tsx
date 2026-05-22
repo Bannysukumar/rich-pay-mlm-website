@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { Button } from '@/components/ui/Button'
 import { Input, Label } from '@/components/ui/Input'
-import { pushAuditLog } from '@/lib/admin/pushAuditLog'
 import {
   adminAdjustMemberBalancesCallable,
   type AdminAdjustMemberBalanceField,
@@ -167,7 +166,6 @@ export function AdminMemberBalanceAdjustPage() {
     setAdjusting(true)
     try {
       await adminAdjustMemberBalancesCallable({ userId: resolved.uid, field, delta: raw })
-      await pushAuditLog('adminWalletAdjust', { userId: resolved.uid, field, delta: raw })
       toast.success('Balance adjusted')
       form.reset()
     } catch (err: unknown) {
