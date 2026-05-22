@@ -24,6 +24,7 @@ import {
   mergeWithdrawPolicy,
 } from '@/lib/withdrawPolicy'
 import { isLiveActivePackage } from '@/lib/activePackagesDisplay'
+import { ReferralCampaignBannerModal } from '@/components/dashboard/ReferralCampaignBannerModal'
 import { referralTierBarHud } from '@/lib/referralCampaignProgress'
 import {
   openReferralWhatsappShare,
@@ -311,21 +312,38 @@ export function DashboardHome() {
 
   const showCampaignBanner = useMemo(() => {
     const c = campaignProgress?.campaign
-    if (!c?.bannerEnabled || !c.bannerMessage.trim()) return false
+    if (!c?.bannerEnabled) return false
+    const hasContent = Boolean(c.bannerImageUrl?.trim() || c.bannerMessage.trim())
+    if (!hasContent) return false
     const dismissed = profile?.dismissedReferralCampaignBanners?.[c.id] ?? 0
     return dismissed < (c.bannerDismissVersion ?? 0)
   }, [campaignProgress, profile?.dismissedReferralCampaignBanners])
 
+  const [bannerPopupDismissed, setBannerPopupDismissed] = useState(false)
+
+  useEffect(() => {
+    if (showCampaignBanner) setBannerPopupDismissed(false)
+  }, [
+    showCampaignBanner,
+    campaignProgress?.campaign?.id,
+    campaignProgress?.campaign?.bannerDismissVersion,
+  ])
+
   const dismissCampaignBanner = async () => {
     const id = campaignProgress?.campaign?.id
     if (!id) return
+    setBannerPopupDismissed(true)
     try {
       await dismissReferralCampaignBannerCallable(id)
-      toast.success('Banner dismissed')
+      toast.success('Banner closed')
     } catch (err) {
+      setBannerPopupDismissed(false)
       toast.error(getCallableErrorMessage(err) || 'Could not dismiss banner')
     }
   }
+
+  const showCampaignPopup =
+    showCampaignBanner && !bannerPopupDismissed && campaignProgress?.campaign != null
 
   const copy = async () => {
     if (!refLink) return
@@ -439,6 +457,13 @@ export function DashboardHome() {
 
   return (
     <main className="container-fluid py-4 px-3">
+      {showCampaignPopup ? (
+        <ReferralCampaignBannerModal
+          campaign={campaignProgress!.campaign!}
+          onDismiss={() => void dismissCampaignBanner()}
+        />
+      ) : null}
+
       <div className="row mb-4">
         <div className="col-12">
           <h2 style={{ fontWeight: 700, color: '#d4af37' }}>Your Referral Hub</h2>
@@ -447,41 +472,6 @@ export function DashboardHome() {
           </p>
         </div>
       </div>
-
-      {showCampaignBanner && campaignProgress?.campaign ? (
-        <div className="row mb-4">
-          <div className="col-12">
-            <div
-              className="position-relative rounded-3 border p-4"
-              style={{
-                borderColor: 'rgba(212,175,55,0.45)',
-                background: 'linear-gradient(135deg, rgba(212,175,55,0.12) 0%, rgba(20,20,20,0.95) 60%)',
-              }}
-            >
-              <button
-                type="button"
-                className="btn-close btn-close-white position-absolute top-0 end-0 m-3"
-                aria-label="Dismiss"
-                onClick={() => void dismissCampaignBanner()}
-              />
-              {campaignProgress.campaign.bannerImageUrl ? (
-                <img
-                  src={campaignProgress.campaign.bannerImageUrl}
-                  alt=""
-                  className="mb-3 rounded"
-                  style={{ maxHeight: 120, objectFit: 'cover', width: '100%' }}
-                />
-              ) : null}
-              <h3 className="mb-2" style={{ color: '#d4af37', fontWeight: 600 }}>
-                {campaignProgress.campaign.bannerTitle || campaignProgress.campaign.title}
-              </h3>
-              <p className="mb-0" style={{ color: '#ddd' }}>
-                {campaignProgress.campaign.bannerMessage}
-              </p>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       <div className="row mb-4">
         <div className="col-12">

@@ -1,3 +1,4 @@
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage'
 import { collection, doc, getDocs, onSnapshot, setDoc } from 'firebase/firestore'
 import { useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
@@ -7,7 +8,7 @@ import { Input, Label } from '@/components/ui/Input'
 import { adminListReferralCampaignCompletionsCallable } from '@/lib/api/adminCallables'
 import { getCallableErrorMessage } from '@/lib/api/callableErrorMessage'
 import { COLLECTIONS } from '@/lib/constants'
-import { db } from '@/lib/firebase'
+import { db, storage } from '@/lib/firebase'
 import { pushAuditLog } from '@/lib/admin/pushAuditLog'
 import type {
   ReferralCampaign,
@@ -209,6 +210,14 @@ export function AdminReferralCampaignsPage() {
         toast.error('Add at least one reward tier')
         return
       }
+      if (
+        form.bannerEnabled &&
+        !form.bannerImageUrl?.trim() &&
+        !form.bannerMessage.trim()
+      ) {
+        toast.error('Popup banner needs an image and/or message')
+        return
+      }
       const payload = {
         title: form.title.trim() || 'Referral rewards',
         subtitle: form.subtitle?.trim() || null,
@@ -238,6 +247,22 @@ export function AdminReferralCampaignsPage() {
   const bumpBannerVersion = () => {
     setForm((f) => ({ ...f, bannerDismissVersion: (f.bannerDismissVersion ?? 0) + 1 }))
     toast.success('Banner version bumped — save to apply')
+  }
+
+  const uploadBannerImage = async (file: File) => {
+    setBusy(true)
+    try {
+      const path = `site/referral_campaigns/${selectedId}/banner_${Date.now()}_${file.name.replace(/\s+/g, '_')}`
+      const r = ref(storage, path)
+      await uploadBytes(r, file)
+      const url = await getDownloadURL(r)
+      setForm((f) => ({ ...f, bannerImageUrl: url }))
+      toast.success('Banner image uploaded — click Save campaign')
+    } catch {
+      toast.error('Upload failed — check Storage rules')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const addTier = () => {
@@ -461,38 +486,80 @@ export function AdminReferralCampaignsPage() {
       </Card>
 
       <Card className="space-y-4 p-4">
-        <h2 className="text-lg font-medium text-[#d4af37]">Dashboard banner</h2>
+        <h2 className="text-lg font-medium text-[#d4af37]">Dashboard popup banner</h2>
+        <p className="text-sm text-[#9898a8]">
+          When the campaign is <strong className="text-[#e4e4e7]">Active</strong> and inside the date window, members see a
+          popup with your image and/or message when they open the dashboard. They can close it; use{' '}
+          <strong className="text-[#e4e4e7]">Bump version</strong> to show it again after a dismiss.
+        </p>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={form.bannerEnabled}
             onChange={(e) => setForm((f) => ({ ...f, bannerEnabled: e.target.checked }))}
           />
-          Show banner on member dashboard
+          Show popup banner on member dashboard
         </label>
-        <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <Label>Banner title</Label>
-            <Input
-              value={form.bannerTitle ?? ''}
-              onChange={(e) => setForm((f) => ({ ...f, bannerTitle: e.target.value }))}
-            />
-          </div>
-          <div>
-            <Label>Image URL (optional)</Label>
-            <Input
-              value={form.bannerImageUrl ?? ''}
-              onChange={(e) => setForm((f) => ({ ...f, bannerImageUrl: e.target.value }))}
-            />
-          </div>
+        <div>
+          <Label>Banner title (popup header)</Label>
+          <Input
+            value={form.bannerTitle ?? ''}
+            onChange={(e) => setForm((f) => ({ ...f, bannerTitle: e.target.value }))}
+            placeholder={form.title}
+          />
         </div>
         <div>
-          <Label>Banner message</Label>
+          <Label>Popup image (optional)</Label>
+          {form.bannerImageUrl ? (
+            <img
+              src={form.bannerImageUrl}
+              alt="Banner preview"
+              className="mb-3 mt-2 max-h-48 rounded-lg border border-[rgba(212,175,55,0.3)] object-contain"
+            />
+          ) : (
+            <p className="mt-1 text-xs text-[#6b6b7c]">No image — message-only popup is OK.</p>
+          )}
+          <div className="mt-2 grid gap-3 md:grid-cols-2">
+            <div>
+              <Label className="text-[10px]">Upload PNG / JPG</Label>
+              <Input
+                type="file"
+                accept="image/*"
+                disabled={busy}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) void uploadBannerImage(file)
+                  e.target.value = ''
+                }}
+              />
+            </div>
+            <div>
+              <Label className="text-[10px]">Or paste image URL</Label>
+              <Input
+                value={form.bannerImageUrl ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, bannerImageUrl: e.target.value }))}
+              />
+            </div>
+          </div>
+          {form.bannerImageUrl ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-2"
+              onClick={() => setForm((f) => ({ ...f, bannerImageUrl: undefined }))}
+            >
+              Remove image
+            </Button>
+          ) : null}
+        </div>
+        <div>
+          <Label>Banner message (optional if image is set)</Label>
           <textarea
             className="mt-1 w-full rounded border border-[#444] bg-[#1a1a1a] p-3 text-sm text-white"
             rows={3}
             value={form.bannerMessage}
             onChange={(e) => setForm((f) => ({ ...f, bannerMessage: e.target.value }))}
+            placeholder="Short text under the image in the popup"
           />
         </div>
         <div className="flex flex-wrap items-center gap-3">
