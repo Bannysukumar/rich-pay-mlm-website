@@ -211,6 +211,8 @@ export interface SiteSettings {
   withdrawalWindowTimezone?: string
   withdrawalWindowStart?: string
   withdrawalWindowEnd?: string
+  /** Weekdays when withdrawals are allowed (0=Sun … 6=Sat). Default Mon–Sat: [1,2,3,4,5,6]. */
+  withdrawalAllowedWeekdays?: number[]
   withdrawalRequiresActivePackage?: boolean
   withdrawalProcessingIntervalHours?: number
   withdrawalProcessingMode?: 'manual' | 'auto'

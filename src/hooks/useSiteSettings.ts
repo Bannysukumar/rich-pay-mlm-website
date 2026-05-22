@@ -20,6 +20,7 @@ const defaults: SiteSettings = {
   withdrawalWindowTimezone: 'Etc/UTC',
   withdrawalWindowStart: '10:30',
   withdrawalWindowEnd: '13:30',
+  withdrawalAllowedWeekdays: [1, 2, 3, 4, 5, 6],
   withdrawalRequiresActivePackage: true,
   withdrawalProcessingIntervalHours: 48,
   withdrawalProcessingMode: 'manual',
@@ -93,6 +94,9 @@ export function useSiteSettings() {
             d.withdrawalWindowStart != null ? String(d.withdrawalWindowStart) : defaults.withdrawalWindowStart,
           withdrawalWindowEnd:
             d.withdrawalWindowEnd != null ? String(d.withdrawalWindowEnd) : defaults.withdrawalWindowEnd,
+          withdrawalAllowedWeekdays: Array.isArray(d.withdrawalAllowedWeekdays)
+            ? (d.withdrawalAllowedWeekdays as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
+            : defaults.withdrawalAllowedWeekdays,
           withdrawalRequiresActivePackage:
             d.withdrawalRequiresActivePackage !== undefined
               ? Boolean(d.withdrawalRequiresActivePackage)

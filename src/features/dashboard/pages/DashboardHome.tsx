@@ -17,7 +17,9 @@ import { db } from '@/lib/firebase'
 import {
   computeMaxWithdrawForPrincipal,
   fmtNextAutoSummary,
-  isWithinWithdrawalWindow,
+  formatWithdrawalAllowedWeekdays,
+  isWithdrawalAllowedNow,
+  isWithdrawalDayAllowed,
   livePolicyFromSiteSettings,
   mergeWithdrawPolicy,
 } from '@/lib/withdrawPolicy'
@@ -277,8 +279,12 @@ export function DashboardHome() {
     return computeMaxWithdrawForPrincipal(mx, withdrawalPolicyMerged)
   }, [withdrawalPolicyMerged, maxActivePrincipal])
 
+  const withdrawDayAllowed = useMemo(
+    () => isWithdrawalDayAllowed(withdrawalPolicyMerged),
+    [withdrawalPolicyMerged, clockTick],
+  )
   const withdrawWindowOpen = useMemo(
-    () => isWithinWithdrawalWindow(withdrawalPolicyMerged),
+    () => isWithdrawalAllowedNow(withdrawalPolicyMerged),
     [withdrawalPolicyMerged, clockTick],
   )
 
@@ -590,6 +596,18 @@ export function DashboardHome() {
             <div className="small mt-1 mb-0" style={{ color: '#aaa' }}>
               {capLine}
               {' · '}
+              Days ({String(withdrawalPolicyMerged.withdrawalWindowTimezone ?? 'Etc/UTC')}):{' '}
+              <strong className="text-light">
+                {formatWithdrawalAllowedWeekdays(withdrawalPolicyMerged.withdrawalAllowedWeekdays)}
+              </strong>
+              {' — '}
+              {withdrawDayAllowed ? (
+                <span className="text-success">today OK</span>
+              ) : (
+                <span className="text-warning">not today</span>
+              )}
+            </div>
+            <div className="small mt-1 mb-0" style={{ color: '#aaa' }}>
               Window ({String(withdrawalPolicyMerged.withdrawalWindowTimezone ?? 'Etc/UTC')}):{' '}
               <strong className="text-light">
                 {String(withdrawalPolicyMerged.withdrawalWindowStart)} – {String(withdrawalPolicyMerged.withdrawalWindowEnd)}

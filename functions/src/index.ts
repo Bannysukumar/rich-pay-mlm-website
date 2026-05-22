@@ -87,6 +87,7 @@ function freezeWithdrawPolicyFromSettings(settings: Record<string, unknown>): Re
     withdrawalWindowStart: String(settings.withdrawalWindowStart ?? '10:30'),
     withdrawalWindowEnd: String(settings.withdrawalWindowEnd ?? '13:30'),
     withdrawalWindowTimezone: String(settings.withdrawalWindowTimezone ?? 'Etc/UTC'),
+    withdrawalAllowedWeekdays: normalizeWithdrawalAllowedWeekdays(settings.withdrawalAllowedWeekdays),
     withdrawalProcessingIntervalHours: Number(settings.withdrawalProcessingIntervalHours ?? 48),
     withdrawalProcessingMode: String(settings.withdrawalProcessingMode ?? 'manual'),
     withdrawalCooldownHours: Number(settings.withdrawalCooldownHours ?? 78),
@@ -117,7 +118,50 @@ function mergeWithdrawPolicyForUser(
   merged.withdrawalWindowStart = livePol.withdrawalWindowStart
   merged.withdrawalWindowEnd = livePol.withdrawalWindowEnd
   merged.withdrawalWindowTimezone = livePol.withdrawalWindowTimezone
+  merged.withdrawalAllowedWeekdays = livePol.withdrawalAllowedWeekdays
   return merged
+}
+
+const DEFAULT_WITHDRAWAL_ALLOWED_WEEKDAYS = [1, 2, 3, 4, 5, 6]
+
+function normalizeWithdrawalAllowedWeekdays(raw: unknown): number[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [...DEFAULT_WITHDRAWAL_ALLOWED_WEEKDAYS]
+  const set = new Set<number>()
+  for (const x of raw) {
+    const n = Number(x)
+    if (Number.isInteger(n) && n >= 0 && n <= 6) set.add(n)
+  }
+  if (set.size === 0) return [...DEFAULT_WITHDRAWAL_ALLOWED_WEEKDAYS]
+  return [...set].sort((a, b) => a - b)
+}
+
+function weekdayInTimezone(date: Date, timeZone: string): number | null {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
+    const label = fmt.format(date)
+    const map: Record<string, number> = {
+      Sun: 0,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    }
+    const wd = map[label]
+    return wd === undefined ? null : wd
+  } catch {
+    return null
+  }
+}
+
+function isWithdrawalDayAllowed(policy: Record<string, unknown>, date = new Date()): boolean {
+  const days = normalizeWithdrawalAllowedWeekdays(policy.withdrawalAllowedWeekdays)
+  if (days.length >= 7) return true
+  const tz = String(policy.withdrawalWindowTimezone ?? 'Etc/UTC')
+  const wd = weekdayInTimezone(date, tz)
+  if (wd === null) return true
+  return days.includes(wd)
 }
 
 function wallClockMinutes(date: Date, timeZone: string): number | null {
@@ -1792,6 +1836,13 @@ export const createWithdrawal = onCall(callableRuntimeOpts, async (request) => {
     throw new HttpsError('failed-precondition', 'Withdrawals are temporarily disabled')
   }
 
+  if (!isWithdrawalDayAllowed(policy)) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Withdrawals are not allowed today — check allowed days in the withdrawal schedule.',
+    )
+  }
+
   if (!isWithinWithdrawalWindow(policy)) {
     throw new HttpsError(
       'failed-precondition',
@@ -3135,6 +3186,9 @@ export const adminSeedCompensationDefaults = onCall(callableRuntimeOpts, async (
     if (c.withdrawalWindowStart == null) withdrawSeed.withdrawalWindowStart = '10:30'
     if (c.withdrawalWindowEnd == null) withdrawSeed.withdrawalWindowEnd = '13:30'
     if (c.withdrawalWindowTimezone == null) withdrawSeed.withdrawalWindowTimezone = 'Etc/UTC'
+    if (!Array.isArray(c.withdrawalAllowedWeekdays) || c.withdrawalAllowedWeekdays.length === 0) {
+      withdrawSeed.withdrawalAllowedWeekdays = [1, 2, 3, 4, 5, 6]
+    }
     if (c.withdrawalRequiresActivePackage === undefined) withdrawSeed.withdrawalRequiresActivePackage = true
     if (c.withdrawalProcessingIntervalHours == null) withdrawSeed.withdrawalProcessingIntervalHours = 48
     if (c.withdrawalProcessingMode == null) withdrawSeed.withdrawalProcessingMode = 'manual'

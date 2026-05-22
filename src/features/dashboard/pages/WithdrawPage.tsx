@@ -15,6 +15,9 @@ import {
   computeWithdrawalCooldown,
   fmtNextAutoSummary,
   isWithdrawalAmountStepValid,
+  formatWithdrawalAllowedWeekdays,
+  isWithdrawalAllowedNow,
+  isWithdrawalDayAllowed,
   isWithinWithdrawalWindow,
   livePolicyFromSiteSettings,
   mergeWithdrawPolicy,
@@ -110,7 +113,9 @@ export function WithdrawPage() {
   const amountStep = withdrawalAmountStep(policy)
   const cooldownH = withdrawalCooldownHours(policy)
 
-  const windowOpen = useMemo(() => isWithinWithdrawalWindow(policy), [policy, clockTick])
+  const dayAllowed = useMemo(() => isWithdrawalDayAllowed(policy), [policy, clockTick])
+  const timeWindowOpen = useMemo(() => isWithinWithdrawalWindow(policy), [policy, clockTick])
+  const withdrawOpen = useMemo(() => isWithdrawalAllowedNow(policy), [policy, clockTick])
 
   const cooldown = useMemo(
     () => computeWithdrawalCooldown(lastWithdrawMs, cooldownH, Date.now()),
@@ -129,7 +134,11 @@ export function WithdrawPage() {
       toast.error('Withdrawals are disabled — check back later')
       return
     }
-    if (!windowOpen) {
+    if (!dayAllowed) {
+      toast.error(`Withdrawals are not allowed today (${formatWithdrawalAllowedWeekdays(policy.withdrawalAllowedWeekdays)} only)`)
+      return
+    }
+    if (!timeWindowOpen) {
       toast.error('Outside the allowed withdrawal time window')
       return
     }
@@ -219,12 +228,20 @@ export function WithdrawPage() {
                     Network: <strong>{String(policy.withdrawNetworkLabel ?? settings.depositNetwork)}</strong>
                   </div>
                   <div>
+                    Allowed days ({String(policy.withdrawalWindowTimezone ?? 'Etc/UTC')}):{' '}
+                    <strong>{formatWithdrawalAllowedWeekdays(policy.withdrawalAllowedWeekdays)}</strong> —{' '}
+                    {dayAllowed ? <span className="text-success">today OK</span> : <span className="text-warning">not today</span>}
+                  </div>
+                  <div>
                     Time window ({String(policy.withdrawalWindowTimezone ?? 'Etc/UTC')}):{' '}
                     <strong>
                       {String(policy.withdrawalWindowStart)} – {String(policy.withdrawalWindowEnd)}
                     </strong>{' '}
-                    — {windowOpen ? <span className="text-success">open now</span> : <span className="text-warning">closed now</span>}
+                    — {timeWindowOpen ? <span className="text-success">open now</span> : <span className="text-warning">closed now</span>}
                   </div>
+                  {!withdrawOpen ? (
+                    <div className="text-warning mt-1">Withdrawals are closed right now (day or time window).</div>
+                  ) : null}
                   <div>
                     Fee: <strong>{feePercent}%</strong> · Min: <strong>${minWithdraw}</strong> · Step:{' '}
                     <strong>${amountStep}</strong> multiples only
@@ -320,7 +337,7 @@ export function WithdrawPage() {
                     <button
                       type="submit"
                       className="btn btn-primary"
-                      disabled={busy || (cooldown.blocked && cooldownH > 0)}
+                      disabled={busy || !withdrawOpen || (cooldown.blocked && cooldownH > 0)}
                     >
                       {busy ? 'Submitting…' : 'Submit'}
                     </button>

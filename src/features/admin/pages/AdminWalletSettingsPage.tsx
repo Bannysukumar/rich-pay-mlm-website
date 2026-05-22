@@ -6,7 +6,22 @@ import { Button } from '@/components/ui/Button'
 import { Input, Label } from '@/components/ui/Input'
 import { useLiveSiteConfig } from '@/hooks/admin/useLiveSiteConfig'
 import { getHttpsCallable } from '@/lib/api/httpsCallableHelper'
+import {
+  DEFAULT_WITHDRAWAL_ALLOWED_WEEKDAYS,
+  formatWithdrawalAllowedWeekdays,
+  normalizeWithdrawalAllowedWeekdays,
+} from '@/lib/withdrawPolicy'
 import type { WithdrawPackageCapRow } from '@/types/models'
+
+const WEEKDAY_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: 'Sunday' },
+  { value: 1, label: 'Monday' },
+  { value: 2, label: 'Tuesday' },
+  { value: 3, label: 'Wednesday' },
+  { value: 4, label: 'Thursday' },
+  { value: 5, label: 'Friday' },
+  { value: 6, label: 'Saturday' },
+]
 
 const DEFAULT_CAPS: WithdrawPackageCapRow[] = [
   { packageAmount: 100, maxWithdrawal: 20, usePercentFormula: false, percentOfPackage: 20, active: true, sortOrder: 10 },
@@ -42,6 +57,7 @@ export function AdminWalletSettingsPage() {
   const [winStart, setWinStart] = useState('10:30')
   const [winEnd, setWinEnd] = useState('13:30')
   const [winTz, setWinTz] = useState('Etc/UTC')
+  const [allowedWeekdays, setAllowedWeekdays] = useState<number[]>([...DEFAULT_WITHDRAWAL_ALLOWED_WEEKDAYS])
   const [requireActivePkg, setRequireActivePkg] = useState(true)
   const [withdrawEnabled, setWithdrawEnabled] = useState(true)
   const [processingMode, setProcessingMode] = useState<'manual' | 'auto'>('manual')
@@ -63,6 +79,7 @@ export function AdminWalletSettingsPage() {
     setWinStart(String(data.withdrawalWindowStart ?? '10:30'))
     setWinEnd(String(data.withdrawalWindowEnd ?? '13:30'))
     setWinTz(String(data.withdrawalWindowTimezone ?? 'Etc/UTC'))
+    setAllowedWeekdays(normalizeWithdrawalAllowedWeekdays(data.withdrawalAllowedWeekdays))
     setRequireActivePkg(data.withdrawalRequiresActivePackage !== false)
     setWithdrawEnabled(data.withdrawalsEnabled !== false)
     setProcessingMode(data.withdrawalProcessingMode === 'auto' ? 'auto' : 'manual')
@@ -87,6 +104,7 @@ export function AdminWalletSettingsPage() {
           withdrawalWindowStart: winStart.trim(),
           withdrawalWindowEnd: winEnd.trim(),
           withdrawalWindowTimezone: winTz.trim(),
+          withdrawalAllowedWeekdays: normalizeWithdrawalAllowedWeekdays(allowedWeekdays),
           withdrawalRequiresActivePackage: requireActivePkg,
           withdrawalsEnabled: withdrawEnabled,
           withdrawalProcessingMode: processingMode,
@@ -190,6 +208,44 @@ export function AdminWalletSettingsPage() {
           <Label>Timezone (IANA)</Label>
           <Input value={winTz} onChange={(e) => setWinTz(e.target.value)} placeholder="Etc/UTC" />
           <p className="mt-1 text-[10px] text-zinc-500">Member requests are validated inside this TZ.</p>
+        </div>
+        <div className="md:col-span-2">
+          <Label>Allowed withdrawal days</Label>
+          <p className="mb-2 text-[10px] text-zinc-500">
+            Members may withdraw only on checked days (in the timezone above). Default: Mon–Sat (no Sunday).
+          </p>
+          <div className="flex flex-wrap gap-3">
+            {WEEKDAY_OPTIONS.map((opt) => (
+              <label key={opt.value} className="flex items-center gap-2 text-xs text-zinc-300">
+                <input
+                  type="checkbox"
+                  className="accent-red-600"
+                  checked={allowedWeekdays.includes(opt.value)}
+                  onChange={(e) => {
+                    setAllowedWeekdays((prev) => {
+                      const set = new Set(prev)
+                      if (e.target.checked) set.add(opt.value)
+                      else set.delete(opt.value)
+                      const next = [...set].sort((a, b) => a - b)
+                      return next.length > 0 ? next : [...DEFAULT_WITHDRAWAL_ALLOWED_WEEKDAYS]
+                    })
+                  }}
+                />
+                {opt.label}
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 text-[10px] text-zinc-500">
+            Schedule: <strong className="text-zinc-300">{formatWithdrawalAllowedWeekdays(allowedWeekdays)}</strong>
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-2 text-xs"
+            onClick={() => setAllowedWeekdays([...DEFAULT_WITHDRAWAL_ALLOWED_WEEKDAYS])}
+          >
+            Reset to Mon–Sat
+          </Button>
         </div>
         <div>
           <Label>Require active package</Label>

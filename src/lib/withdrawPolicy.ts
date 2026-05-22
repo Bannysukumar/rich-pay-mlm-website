@@ -2,6 +2,11 @@ import type { SiteSettings, WithdrawPackageCapRow } from '@/types/models'
 
 export type WithdrawPolicy = Record<string, unknown>
 
+/** Mon–Sat (Sunday excluded). */
+export const DEFAULT_WITHDRAWAL_ALLOWED_WEEKDAYS: number[] = [1, 2, 3, 4, 5, 6]
+
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
+
 export function livePolicyFromSiteSettings(s: SiteSettings): WithdrawPolicy {
   return {
     withdrawPoliciesVersion: s.withdrawPoliciesVersion ?? 0,
@@ -13,6 +18,7 @@ export function livePolicyFromSiteSettings(s: SiteSettings): WithdrawPolicy {
     withdrawalWindowStart: s.withdrawalWindowStart ?? '10:30',
     withdrawalWindowEnd: s.withdrawalWindowEnd ?? '13:30',
     withdrawalWindowTimezone: s.withdrawalWindowTimezone ?? 'Etc/UTC',
+    withdrawalAllowedWeekdays: normalizeWithdrawalAllowedWeekdays(s.withdrawalAllowedWeekdays),
     withdrawalProcessingIntervalHours: s.withdrawalProcessingIntervalHours ?? 48,
     withdrawalProcessingMode: s.withdrawalProcessingMode ?? 'manual',
     withdrawalCooldownHours: s.withdrawalCooldownHours ?? 78,
@@ -81,7 +87,56 @@ export function mergeWithdrawPolicy(live: WithdrawPolicy, frozen?: Record<string
   merged.withdrawalWindowStart = live.withdrawalWindowStart
   merged.withdrawalWindowEnd = live.withdrawalWindowEnd
   merged.withdrawalWindowTimezone = live.withdrawalWindowTimezone
+  merged.withdrawalAllowedWeekdays = live.withdrawalAllowedWeekdays
   return merged
+}
+
+export function normalizeWithdrawalAllowedWeekdays(raw: unknown): number[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [...DEFAULT_WITHDRAWAL_ALLOWED_WEEKDAYS]
+  const set = new Set<number>()
+  for (const x of raw) {
+    const n = Number(x)
+    if (Number.isInteger(n) && n >= 0 && n <= 6) set.add(n)
+  }
+  if (set.size === 0) return [...DEFAULT_WITHDRAWAL_ALLOWED_WEEKDAYS]
+  return [...set].sort((a, b) => a - b)
+}
+
+export function formatWithdrawalAllowedWeekdays(days: unknown): string {
+  const sorted = normalizeWithdrawalAllowedWeekdays(days)
+  if (sorted.length >= 7) return 'Every day'
+  if (sorted.join(',') === '1,2,3,4,5,6') return 'Mon–Sat'
+  if (sorted.join(',') === '0,1,2,3,4,5,6') return 'Sun–Sat'
+  return sorted.map((d) => WEEKDAY_SHORT[d] ?? '?').join(', ')
+}
+
+export function weekdayInTimezone(date: Date, timeZone: string): number | null {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' })
+    const label = fmt.format(date)
+    const map: Record<string, number> = {
+      Sun: 0,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    }
+    const wd = map[label]
+    return wd === undefined ? null : wd
+  } catch {
+    return null
+  }
+}
+
+export function isWithdrawalDayAllowed(policy: WithdrawPolicy, date = new Date()): boolean {
+  const days = normalizeWithdrawalAllowedWeekdays(policy.withdrawalAllowedWeekdays)
+  if (days.length >= 7) return true
+  const tz = String(policy.withdrawalWindowTimezone ?? 'Etc/UTC')
+  const wd = weekdayInTimezone(date, tz)
+  if (wd === null) return true
+  return days.includes(wd)
 }
 
 export function wallClockMinutes(date: Date, timeZone: string): number | null {
@@ -122,6 +177,11 @@ export function isWithinWithdrawalWindow(policy: WithdrawPolicy, date = new Date
   if (nowM === null || s === null || e === null) return true
   if (s <= e) return nowM >= s && nowM <= e
   return nowM >= s || nowM <= e
+}
+
+/** Time window and allowed weekday (policy timezone) must both pass. */
+export function isWithdrawalAllowedNow(policy: WithdrawPolicy, date = new Date()): boolean {
+  return isWithinWithdrawalWindow(policy, date) && isWithdrawalDayAllowed(policy, date)
 }
 
 export function computeMaxWithdrawForPrincipal(principal: number, policy: WithdrawPolicy): number {
