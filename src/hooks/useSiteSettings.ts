@@ -23,6 +23,8 @@ const defaults: SiteSettings = {
   withdrawalRequiresActivePackage: true,
   withdrawalProcessingIntervalHours: 48,
   withdrawalProcessingMode: 'manual',
+  withdrawalCooldownHours: 78,
+  withdrawalAmountStep: 10,
   defaultWithdrawalPercentOfPackage: 20,
   withdrawPackageCaps: [],
   sponsorPercent: 5,
@@ -104,6 +106,10 @@ export function useSiteSettings() {
               : d.withdrawalProcessingMode === 'manual'
                 ? 'manual'
                 : defaults.withdrawalProcessingMode,
+          withdrawalCooldownHours: Number(
+            d.withdrawalCooldownHours ?? defaults.withdrawalCooldownHours ?? 78,
+          ),
+          withdrawalAmountStep: Number(d.withdrawalAmountStep ?? defaults.withdrawalAmountStep ?? 10),
           defaultWithdrawalPercentOfPackage: Number(
             d.defaultWithdrawalPercentOfPackage ?? defaults.defaultWithdrawalPercentOfPackage,
           ),

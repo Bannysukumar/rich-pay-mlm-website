@@ -1,4 +1,4 @@
-import { collection, onSnapshot, query, where } from 'firebase/firestore'
+import { collection, limit, onSnapshot, orderBy, query, where } from 'firebase/firestore'
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import toast from 'react-hot-toast'
@@ -12,10 +12,14 @@ import { db } from '@/lib/firebase'
 import { isLiveActivePackage } from '@/lib/activePackagesDisplay'
 import {
   computeMaxWithdrawForPrincipal,
+  computeWithdrawalCooldown,
   fmtNextAutoSummary,
+  isWithdrawalAmountStepValid,
   isWithinWithdrawalWindow,
   livePolicyFromSiteSettings,
   mergeWithdrawPolicy,
+  withdrawalAmountStep,
+  withdrawalCooldownHours,
 } from '@/lib/withdrawPolicy'
 
 export function WithdrawPage() {
@@ -27,6 +31,7 @@ export function WithdrawPage() {
   const [maxPrincipal, setMaxPrincipal] = useState(0)
   const [banner, setBanner] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
   const [clockTick, setClockTick] = useState(0)
+  const [lastWithdrawMs, setLastWithdrawMs] = useState<number | null>(null)
 
   const cash = profile?.wallets.cash ?? 0
   const defaultAddress = profile?.usdtBep20Address?.trim() ?? ''
@@ -45,6 +50,31 @@ export function WithdrawPage() {
         mx = Math.max(mx, Number(row.amount ?? 0))
       })
       setMaxPrincipal(mx)
+    })
+  }, [firebaseUid])
+
+  useEffect(() => {
+    if (!firebaseUid) {
+      setLastWithdrawMs(null)
+      return
+    }
+    const q = query(
+      collection(db, COLLECTIONS.withdrawals),
+      where('userId', '==', firebaseUid),
+      orderBy('createdAt', 'desc'),
+      limit(15),
+    )
+    return onSnapshot(q, (snap) => {
+      for (const d of snap.docs) {
+        const row = d.data() as Record<string, unknown>
+        if (String(row.status ?? '') === 'rejected') continue
+        const c = row.createdAt as { toMillis?: () => number } | undefined
+        if (c && typeof c.toMillis === 'function') {
+          setLastWithdrawMs(c.toMillis())
+          return
+        }
+      }
+      setLastWithdrawMs(null)
     })
   }, [firebaseUid])
 
@@ -77,8 +107,15 @@ export function WithdrawPage() {
 
   const minWithdraw = Number(policy.minWithdrawal ?? settings.minWithdrawal)
   const feePercent = Number(policy.withdrawFeePercent ?? settings.withdrawFeePercent)
+  const amountStep = withdrawalAmountStep(policy)
+  const cooldownH = withdrawalCooldownHours(policy)
 
   const windowOpen = useMemo(() => isWithinWithdrawalWindow(policy), [policy, clockTick])
+
+  const cooldown = useMemo(
+    () => computeWithdrawalCooldown(lastWithdrawMs, cooldownH, Date.now()),
+    [lastWithdrawMs, cooldownH, clockTick],
+  )
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -102,6 +139,14 @@ export function WithdrawPage() {
     }
     if (amount < minWithdraw) {
       toast.error(`Minimum withdrawal ${minWithdraw} USDT`)
+      return
+    }
+    if (!isWithdrawalAmountStepValid(amount, amountStep)) {
+      toast.error(`Amount must be a multiple of ${amountStep} USDT (e.g. ${amountStep}, ${amountStep * 2})`)
+      return
+    }
+    if (cooldown.blocked && cooldown.nextEligibleAt != null) {
+      toast.error(`Next withdrawal available after ${new Date(cooldown.nextEligibleAt).toLocaleString()}`)
       return
     }
     if (Number.isFinite(maxForRequest) && amount > maxForRequest + 1e-6) {
@@ -181,8 +226,21 @@ export function WithdrawPage() {
                     — {windowOpen ? <span className="text-success">open now</span> : <span className="text-warning">closed now</span>}
                   </div>
                   <div>
-                    Fee: <strong>{feePercent}%</strong> · Min: <strong>${minWithdraw}</strong>
+                    Fee: <strong>{feePercent}%</strong> · Min: <strong>${minWithdraw}</strong> · Step:{' '}
+                    <strong>${amountStep}</strong> multiples only
                   </div>
+                  {cooldownH > 0 ? (
+                    <div>
+                      Cooldown: <strong>{cooldownH}h</strong> between requests —{' '}
+                      {cooldown.blocked && cooldown.nextEligibleAt != null ? (
+                        <span className="text-warning">
+                          next eligible {new Date(cooldown.nextEligibleAt).toLocaleString()}
+                        </span>
+                      ) : (
+                        <span className="text-success">you may withdraw now</span>
+                      )}
+                    </div>
+                  ) : null}
                   {policy.withdrawalRequiresActivePackage !== false && maxPrincipal > 0 ? (
                     <div>
                       Active package (max): <strong>${maxPrincipal.toFixed(2)}</strong> · Per-request cap:{' '}
@@ -213,14 +271,16 @@ export function WithdrawPage() {
                           style={{ minWidth: '200px' }}
                           name="epoints"
                           id="epoints"
-                          placeholder="Enter USDT to Withdraw"
+                          placeholder={`e.g. ${amountStep}, ${amountStep * 2}, ${amountStep * 3}`}
                           value={epoints}
                           onChange={(e) => setEpoints(e.target.value)}
                           disabled={busy}
                           inputMode="decimal"
                           autoComplete="off"
                         />
-                        <span className="text-muted f-s-14">(Minimum $ {minWithdraw})</span>
+                        <span className="text-muted f-s-14">
+                          (Min ${minWithdraw}, multiples of ${amountStep})
+                        </span>
                       </div>
                       {Number(epoints) > 0 && (
                         <p className="mt-2 mb-0 small text-secondary">
@@ -257,7 +317,11 @@ export function WithdrawPage() {
                         autoComplete="current-password"
                       />
                     </div>
-                    <button type="submit" className="btn btn-primary" disabled={busy}>
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      disabled={busy || (cooldown.blocked && cooldownH > 0)}
+                    >
                       {busy ? 'Submitting…' : 'Submit'}
                     </button>
                   </form>

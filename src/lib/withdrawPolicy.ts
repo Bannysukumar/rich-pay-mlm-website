@@ -15,15 +15,55 @@ export function livePolicyFromSiteSettings(s: SiteSettings): WithdrawPolicy {
     withdrawalWindowTimezone: s.withdrawalWindowTimezone ?? 'Etc/UTC',
     withdrawalProcessingIntervalHours: s.withdrawalProcessingIntervalHours ?? 48,
     withdrawalProcessingMode: s.withdrawalProcessingMode ?? 'manual',
+    withdrawalCooldownHours: s.withdrawalCooldownHours ?? 78,
+    withdrawalAmountStep: s.withdrawalAmountStep ?? 10,
     withdrawPackageCaps: s.withdrawPackageCaps ?? [],
     defaultWithdrawalPercentOfPackage: s.defaultWithdrawalPercentOfPackage ?? 20,
   }
 }
 
+export function withdrawalAmountStep(policy: WithdrawPolicy): number {
+  return Math.max(1, Math.floor(Number(policy.withdrawalAmountStep ?? 10)))
+}
+
+/** Gross amount must be a whole multiple of `step` USDT (e.g. 10, 20, 30). */
+export function isWithdrawalAmountStepValid(amount: number, step: number): boolean {
+  if (!Number.isFinite(amount) || amount <= 0) return false
+  const s = Math.max(1, Math.floor(Number(step) || 10))
+  const cents = Math.round(amount * 100)
+  return cents > 0 && cents % (s * 100) === 0
+}
+
+export function withdrawalCooldownHours(policy: WithdrawPolicy): number {
+  return Math.max(0, Number(policy.withdrawalCooldownHours ?? 78))
+}
+
+export type WithdrawalCooldownState = {
+  blocked: boolean
+  nextEligibleAt: number | null
+  lastWithdrawalAt: number | null
+}
+
+export function computeWithdrawalCooldown(
+  lastCreatedMs: number | null,
+  cooldownHours: number,
+  nowMs = Date.now(),
+): WithdrawalCooldownState {
+  if (lastCreatedMs == null || cooldownHours <= 0) {
+    return { blocked: false, nextEligibleAt: null, lastWithdrawalAt: lastCreatedMs }
+  }
+  const windowMs = cooldownHours * 3600000
+  const nextEligibleAt = lastCreatedMs + windowMs
+  if (nowMs >= nextEligibleAt) {
+    return { blocked: false, nextEligibleAt: null, lastWithdrawalAt: lastCreatedMs }
+  }
+  return { blocked: true, nextEligibleAt, lastWithdrawalAt: lastCreatedMs }
+}
+
 /**
  * Per-user `withdrawalPolicySnapshot` may only override **package-based** withdrawal caps
  * (`withdrawPackageCaps`, `defaultWithdrawalPercentOfPackage`) captured at activation.
- * Min withdrawal, fee %, time window, and enabled flags always follow live `siteSettings`.
+ * Min withdrawal, fee %, time window, cooldown, amount step, and enabled flags always follow live `siteSettings`.
  */
 export function mergeWithdrawPolicy(live: WithdrawPolicy, frozen?: Record<string, unknown> | null): WithdrawPolicy {
   if (!frozen || typeof frozen !== 'object' || Object.keys(frozen).length === 0) {

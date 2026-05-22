@@ -212,6 +212,10 @@ export interface SiteSettings {
   withdrawalRequiresActivePackage?: boolean
   withdrawalProcessingIntervalHours?: number
   withdrawalProcessingMode?: 'manual' | 'auto'
+  /** Hours after a non-rejected withdrawal before the member may request again (default 78). */
+  withdrawalCooldownHours?: number
+  /** Withdrawal gross amount must be a multiple of this step (default 10 USDT). */
+  withdrawalAmountStep?: number
   defaultWithdrawalPercentOfPackage?: number
   withdrawPackageCaps?: WithdrawPackageCapRow[]
   withdrawPoliciesVersion?: number

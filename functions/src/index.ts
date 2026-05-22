@@ -88,6 +88,8 @@ function freezeWithdrawPolicyFromSettings(settings: Record<string, unknown>): Re
     withdrawalWindowTimezone: String(settings.withdrawalWindowTimezone ?? 'Etc/UTC'),
     withdrawalProcessingIntervalHours: Number(settings.withdrawalProcessingIntervalHours ?? 48),
     withdrawalProcessingMode: String(settings.withdrawalProcessingMode ?? 'manual'),
+    withdrawalCooldownHours: Number(settings.withdrawalCooldownHours ?? 78),
+    withdrawalAmountStep: Number(settings.withdrawalAmountStep ?? 10),
     withdrawPackageCaps: Array.isArray(settings.withdrawPackageCaps) ? settings.withdrawPackageCaps : [],
     defaultWithdrawalPercentOfPackage: Number(settings.defaultWithdrawalPercentOfPackage ?? 20),
   }
@@ -276,6 +278,32 @@ function computeMaxWithdrawalForPrincipal(
   }
   const fallbackPct = Number(policy.defaultWithdrawalPercentOfPackage ?? 20)
   return (principal * fallbackPct) / 100
+}
+
+function isWithdrawalAmountStepValid(amount: number, step: number): boolean {
+  if (!Number.isFinite(amount) || amount <= 0) return false
+  const s = Math.max(1, Math.floor(Number(step) || 10))
+  const cents = Math.round(amount * 100)
+  return cents > 0 && cents % (s * 100) === 0
+}
+
+async function lastNonRejectedWithdrawalCreatedMs(userId: string): Promise<number | null> {
+  const snap = await db
+    .collection(COL_WITHDRAWALS)
+    .where('userId', '==', userId)
+    .orderBy('createdAt', 'desc')
+    .limit(25)
+    .get()
+  for (const doc of snap.docs) {
+    const st = String(doc.data().status ?? '')
+    if (st === 'rejected') continue
+    const created = doc.data().createdAt as { toMillis?: () => number } | number | undefined
+    if (created && typeof created === 'object' && typeof created.toMillis === 'function') {
+      return created.toMillis()
+    }
+    if (typeof created === 'number' && Number.isFinite(created)) return created
+  }
+  return null
 }
 
 type FrozenTeamRow = {
@@ -1718,6 +1746,31 @@ export const createWithdrawal = onCall(callableRuntimeOpts, async (request) => {
     throw new HttpsError('invalid-argument', `Minimum withdrawal ${minW}`)
   }
 
+  const amountStep = Math.max(1, Math.floor(Number(policy.withdrawalAmountStep ?? 10)))
+  if (!isWithdrawalAmountStepValid(amount, amountStep)) {
+    throw new HttpsError(
+      'invalid-argument',
+      `Withdrawal amount must be a multiple of ${amountStep} USDT (e.g. ${amountStep}, ${amountStep * 2}, ${amountStep * 3}).`,
+    )
+  }
+
+  const cooldownH = Math.max(0, Number(policy.withdrawalCooldownHours ?? 78))
+  if (cooldownH > 0) {
+    const lastMs = await lastNonRejectedWithdrawalCreatedMs(uid)
+    if (lastMs != null) {
+      const elapsed = Date.now() - lastMs
+      const windowMs = cooldownH * 3600000
+      if (elapsed < windowMs) {
+        const nextAt = new Date(lastMs + windowMs).toISOString()
+        const waitH = Math.ceil((windowMs - elapsed) / 3600000)
+        throw new HttpsError(
+          'failed-precondition',
+          `You can submit the next withdrawal in about ${waitH} hour(s) (after ${nextAt}).`,
+        )
+      }
+    }
+  }
+
   const maxPrincipal = await maxActivePrincipalForUser(uid)
   if (policy.withdrawalRequiresActivePackage !== false) {
     if (maxPrincipal <= 0) {
@@ -2618,6 +2671,8 @@ export const adminSeedCompensationDefaults = onCall(callableRuntimeOpts, async (
     if (c.withdrawalRequiresActivePackage === undefined) withdrawSeed.withdrawalRequiresActivePackage = true
     if (c.withdrawalProcessingIntervalHours == null) withdrawSeed.withdrawalProcessingIntervalHours = 48
     if (c.withdrawalProcessingMode == null) withdrawSeed.withdrawalProcessingMode = 'manual'
+    if (c.withdrawalCooldownHours == null) withdrawSeed.withdrawalCooldownHours = 78
+    if (c.withdrawalAmountStep == null) withdrawSeed.withdrawalAmountStep = 10
     if (c.defaultWithdrawalPercentOfPackage == null) withdrawSeed.defaultWithdrawalPercentOfPackage = 20
     if (Object.keys(withdrawSeed).length > 0) {
       withdrawDefaultsApplied = true

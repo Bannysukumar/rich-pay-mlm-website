@@ -46,6 +46,8 @@ export function AdminWalletSettingsPage() {
   const [withdrawEnabled, setWithdrawEnabled] = useState(true)
   const [processingMode, setProcessingMode] = useState<'manual' | 'auto'>('manual')
   const [processingHours, setProcessingHours] = useState('48')
+  const [cooldownHours, setCooldownHours] = useState('78')
+  const [amountStep, setAmountStep] = useState('10')
   const [defaultPct, setDefaultPct] = useState('20')
   const [stopAllAtWorkingCap, setStopAllAtWorkingCap] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -65,6 +67,8 @@ export function AdminWalletSettingsPage() {
     setWithdrawEnabled(data.withdrawalsEnabled !== false)
     setProcessingMode(data.withdrawalProcessingMode === 'auto' ? 'auto' : 'manual')
     setProcessingHours(String(Number(data.withdrawalProcessingIntervalHours ?? 48)))
+    setCooldownHours(String(Number(data.withdrawalCooldownHours ?? 78)))
+    setAmountStep(String(Number(data.withdrawalAmountStep ?? 10)))
     setDefaultPct(String(Number(data.defaultWithdrawalPercentOfPackage ?? 20)))
     setStopAllAtWorkingCap(Boolean(data.stopAllIncomeWhenWorkingCapReached))
   }, [data, ready])
@@ -87,6 +91,8 @@ export function AdminWalletSettingsPage() {
           withdrawalsEnabled: withdrawEnabled,
           withdrawalProcessingMode: processingMode,
           withdrawalProcessingIntervalHours: Math.min(336, Math.max(1, Number(processingHours || 48))),
+          withdrawalCooldownHours: Math.min(720, Math.max(0, Number(cooldownHours || 78))),
+          withdrawalAmountStep: Math.min(1000, Math.max(1, Math.floor(Number(amountStep || 10)))),
           defaultWithdrawalPercentOfPackage: Math.min(100, Math.max(0, Number(defaultPct || 20))),
           withdrawPackageCaps: caps.map((c) => ({ ...c })),
         },
@@ -204,6 +210,18 @@ export function AdminWalletSettingsPage() {
         <div>
           <Label>Auto processing cadence target (hours)</Label>
           <Input value={processingHours} onChange={(e) => setProcessingHours(e.target.value)} />
+        </div>
+        <div>
+          <Label>Cooldown between withdrawals (hours)</Label>
+          <Input value={cooldownHours} onChange={(e) => setCooldownHours(e.target.value)} />
+          <p className="mt-1 text-[10px] text-zinc-500">
+            After any non-rejected request, the member must wait this long before another (default 78).
+          </p>
+        </div>
+        <div>
+          <Label>Withdrawal amount step (USDT)</Label>
+          <Input value={amountStep} onChange={(e) => setAmountStep(e.target.value)} />
+          <p className="mt-1 text-[10px] text-zinc-500">Gross amount must be a multiple (10 → 10, 20, 30, 100…).</p>
         </div>
         <div>
           <Label>Processing mode</Label>
