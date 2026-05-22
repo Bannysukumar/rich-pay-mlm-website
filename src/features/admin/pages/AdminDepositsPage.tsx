@@ -211,6 +211,7 @@ export function AdminDepositsPage() {
       return
     }
     const headers = [
+      'S.No.',
       'Deposit document ID',
       'Created (ISO UTC)',
       'Payment ID',
@@ -224,9 +225,10 @@ export function AdminDepositsPage() {
       'Wallet credit applied',
       'Proof URL',
     ]
-    const dataRows = filtered.map((r) => {
+    const dataRows = filtered.map((r, index) => {
       const p = profiles.get(r.userId)
       return [
+        String(index + 1),
         r.id,
         r.ms > 0 ? new Date(r.ms).toISOString() : '',
         paymentIdFromDocId(r.id),
@@ -279,7 +281,7 @@ export function AdminDepositsPage() {
         })
       : '—'
 
-  const colSpan = 11
+  const colSpan = 12
 
   return (
     <div className="space-y-6">
@@ -373,7 +375,10 @@ export function AdminDepositsPage() {
           <table className="w-full min-w-[1080px] text-left text-[12px] text-[#c4c4ce]">
             <thead className="border-b border-[rgba(212,175,55,0.15)] bg-[rgba(212,175,55,0.04)]">
               <tr className="text-[10px] font-bold uppercase tracking-wider text-[#6b6b7c]">
-                <th className="px-3 py-2.5 pl-4">Created</th>
+                <th className="sticky left-0 z-[2] w-12 min-w-[48px] bg-[#1a1d21] px-2 py-2.5 pl-4 text-center shadow-[inset_-1px_0_0_rgba(212,175,55,0.08)]">
+                  #
+                </th>
+                <th className="px-3 py-2.5">Created</th>
                 <th className="px-3 py-2.5">Payment ID</th>
                 <th className="px-3 py-2.5">Username</th>
                 <th className="px-3 py-2.5">Full name</th>
@@ -402,12 +407,20 @@ export function AdminDepositsPage() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((r) => {
+                filtered.map((r, index) => {
                   const p = profiles.get(r.userId)
                   const pendingBg = 'bg-[#1a1d21]'
                   return (
                     <tr key={r.id} className="group border-b border-[rgba(212,175,55,0.08)] hover:bg-[rgba(212,175,55,0.03)]">
-                      <td className="whitespace-nowrap px-3 py-2.5 pl-4 text-[11px] text-[#9898a8]">{fmt(r.ms)}</td>
+                      <td
+                        className={cn(
+                          'sticky left-0 z-[1] w-12 min-w-[48px] bg-[#1a1d21] px-2 py-2.5 pl-4 text-center text-[11px] font-semibold text-[#9898a8]',
+                          'shadow-[inset_-1px_0_0_rgba(212,175,55,0.06)] group-hover:bg-[rgba(212,175,55,0.03)]',
+                        )}
+                      >
+                        {index + 1}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-[11px] text-[#9898a8]">{fmt(r.ms)}</td>
                       <td className="whitespace-nowrap px-3 py-2.5 font-mono text-[11px] text-[#f5e6a8]">
                         {paymentIdFromDocId(r.id)}
                       </td>

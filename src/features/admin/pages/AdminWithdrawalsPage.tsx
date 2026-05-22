@@ -175,6 +175,7 @@ export function AdminWithdrawalsPage() {
       return
     }
     const headers = [
+      'S.No.',
       'Withdrawal document ID',
       'Submitted (ISO UTC)',
       'Username',
@@ -189,9 +190,10 @@ export function AdminWithdrawalsPage() {
       'Status',
       'TXID',
     ]
-    const dataRows = filtered.map((w) => {
+    const dataRows = filtered.map((w, index) => {
       const p = profiles.get(w.userId)
       return [
+        String(index + 1),
         w.id,
         w.ms > 0 ? new Date(w.ms).toISOString() : '',
         p?.username ?? '',
@@ -250,7 +252,7 @@ export function AdminWithdrawalsPage() {
 
   const filterKeys = ['all', 'pending', 'processing', 'approved', 'rejected', 'paid'] as const
 
-  const colSpan = 12
+  const colSpan = 13
 
   const actionCell = (w: Row) => {
     const hasTx = Boolean(txHash.trim())
@@ -396,7 +398,10 @@ export function AdminWithdrawalsPage() {
           <table className="w-full min-w-[1180px] text-left text-[12px] text-[#c4c4ce]">
             <thead className="border-b border-[rgba(212,175,55,0.15)] bg-[rgba(212,175,55,0.04)]">
               <tr className="text-[10px] font-bold uppercase tracking-wider text-[#6b6b7c]">
-                <th className="px-3 py-2.5 pl-4">Submitted</th>
+                <th className="sticky left-0 z-[2] w-12 min-w-[48px] bg-[#1a1d21] px-2 py-2.5 pl-4 text-center shadow-[inset_-1px_0_0_rgba(212,175,55,0.08)]">
+                  #
+                </th>
+                <th className="px-3 py-2.5">Submitted</th>
                 <th className="px-3 py-2.5">Username</th>
                 <th className="px-3 py-2.5">Full name</th>
                 <th className="px-3 py-2.5">Email</th>
@@ -426,14 +431,22 @@ export function AdminWithdrawalsPage() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((w) => {
+                filtered.map((w, index) => {
                   const p = profiles.get(w.userId)
                   return (
                   <tr
                     key={w.id}
                     className="group border-b border-[rgba(212,175,55,0.08)] hover:bg-[rgba(212,175,55,0.03)]"
                   >
-                    <td className="whitespace-nowrap px-3 py-2.5 pl-4 text-[11px] text-[#9898a8]">{fmt(w.ms)}</td>
+                    <td
+                      className={cn(
+                        'sticky left-0 z-[1] w-12 min-w-[48px] bg-[#1a1d21] px-2 py-2.5 pl-4 text-center text-[11px] font-semibold text-[#9898a8]',
+                        'shadow-[inset_-1px_0_0_rgba(212,175,55,0.06)] group-hover:bg-[rgba(212,175,55,0.03)]',
+                      )}
+                    >
+                      {index + 1}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-[11px] text-[#9898a8]">{fmt(w.ms)}</td>
                     <td
                       className="max-w-[120px] truncate px-3 py-2.5 font-mono text-[11px] text-[#e4e4e7]"
                       title={p?.username || undefined}
