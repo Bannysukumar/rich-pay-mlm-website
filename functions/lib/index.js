@@ -534,11 +534,58 @@ function teamLevelPayoutWithinDownlinePlanWindow(row, startedAt, now, planDurati
     const elapsed = wholeDaysSincePackageStart(startedAt, now);
     return elapsed < maxPayDays;
 }
+function teamMatrixHasPayablePercent(rows) {
+    return rows.some((r) => r && Number(r.percent) > 0);
+}
+/**
+ * Team matrix for a downline package: frozen `planSnapshot.teamLevels` first, then the member’s
+ * `rankCompensationSnapshot.teamLevels` (latest activation capture).
+ */
+async function resolveTeamFrozenForPackagePayout(downlineUid, planSnap) {
+    const fromPkg = Array.isArray(planSnap.teamLevels) ? planSnap.teamLevels : [];
+    if (teamMatrixHasPayablePercent(fromPkg))
+        return fromPkg;
+    const uSnap = await db.collection(COL_USERS).doc(downlineUid).get();
+    if (!uSnap.exists)
+        return fromPkg;
+    const rankSnap = uSnap.data()?.rankCompensationSnapshot;
+    const fromUser = Array.isArray(rankSnap?.teamLevels) ? rankSnap.teamLevels : [];
+    if (teamMatrixHasPayablePercent(fromUser))
+        return fromUser;
+    return fromPkg.length > 0 ? fromPkg : fromUser;
+}
+/** Build plan snapshot for ROI/team when legacy `activePackages` rows omit `planSnapshot`. */
+function effectivePlanSnapshotForActivePackage(ap, userData) {
+    const existing = ap.planSnapshot;
+    if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+        return { ...existing };
+    }
+    const rankSnap = userData?.rankCompensationSnapshot;
+    const wMult = Number(ap.frozenWorkingCapMultiplier ??
+        rankSnap?.workingIncomeCapMultiplier ??
+        3);
+    const nwMult = Number(ap.frozenNonWorkingCapMultiplier ??
+        rankSnap?.nonWorkingIncomeCapMultiplier ??
+        2);
+    const amount = Number(ap.amount ?? 0);
+    return {
+        roiPercent: Number(ap.roiPercent ?? 0),
+        durationDays: Number(ap.durationDays ?? 0),
+        planType: String(ap.planType ?? 'daily'),
+        teamLevels: Array.isArray(rankSnap?.teamLevels) ? rankSnap.teamLevels : [],
+        nonWorkingIncomeCapMultiplier: nwMult,
+        workingIncomeCapMultiplier: wMult,
+        workingCap: amount * Math.max(wMult, 0),
+        stopAllIncomeWhenWorkingCapReached: rankSnap?.stopAllIncomeWhenWorkingCapReached === true,
+    };
+}
 /** Split of downline daily ROI to uplines — % × credited ROI; each pay min(gross, sponsor’s working room left). */
 async function distributeTeamLevelIncomeFromDailyRoi(downlineActivePackageId, downlineUid, dailyRoiCredited, planSnap, payoutClock) {
-    if (dailyRoiCredited <= 1e-12 || !planSnap)
+    if (dailyRoiCredited <= 1e-12)
         return;
-    const teamFrozen = Array.isArray(planSnap.teamLevels) ? planSnap.teamLevels : [];
+    const teamFrozen = await resolveTeamFrozenForPackagePayout(downlineUid, planSnap);
+    if (!teamMatrixHasPayablePercent(teamFrozen))
+        return;
     const activeCache = new Map();
     const uplHasActive = async (uid) => {
         const k = String(uid ?? '').trim();
@@ -596,6 +643,7 @@ async function distributeTeamLevelIncomeFromDailyRoi(downlineActivePackageId, do
                             level: row.level,
                             amount: payAmt,
                             activePackageId: downlineActivePackageId,
+                            downlinePackageAmount: Number(planSnap.packageAmount ?? planSnap.activationAmount ?? 0),
                             sourceDailyRoi: dailyRoiCredited,
                             distribution: 'daily_roi_share',
                             /** Upline clients cannot read downline `activePackages`; denorm for dashboard “remaining days”. */
@@ -2503,16 +2551,17 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
             continue;
         }
         const amount = Number(ap.amount ?? 0);
-        const planSnap = (ap.planSnapshot ?? null);
         const userId = userIdEarly;
         const userRow = await db.collection(COL_USERS).doc(userId).get();
         if (!userRow.exists || Boolean(userRow.data()?.blocked)) {
             continue;
         }
+        const userData = userRow.data();
+        const planSnap = effectivePlanSnapshotForActivePackage(ap, userData);
         if (await shouldSkipRoiForPackageOwner(userId, planSnap)) {
             continue;
         }
-        const roiPercent = Number((planSnap && planSnap.roiPercent != null ? planSnap.roiPercent : null) ?? ap.roiPercent ?? 0);
+        const roiPercent = Number(planSnap.roiPercent != null ? planSnap.roiPercent : ap.roiPercent ?? 0);
         const nonWorkingPaid = Number(ap.nonWorkingPaid ?? 0);
         const nwMult = Number(ap.frozenNonWorkingCapMultiplier ??
             planSnap?.nonWorkingIncomeCapMultiplier ??
@@ -2523,7 +2572,7 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
         if (headroom <= 1e-12) {
             continue;
         }
-        const planTypeStr = String((planSnap && planSnap.planType != null ? planSnap.planType : null) ?? ap.planType ?? 'daily').toLowerCase();
+        const planTypeStr = String(planSnap.planType != null ? planSnap.planType : ap.planType ?? 'daily').toLowerCase();
         const compound = planTypeStr === 'compounding';
         const bal = compound ? Number(ap.compoundingBalance ?? amount) : amount;
         const rawDaily = (bal * roiPercent) / 100;
@@ -2553,7 +2602,7 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
         const startedAt = ap.startedAt;
-        const durationDays = Number((planSnap && planSnap.durationDays != null ? planSnap.durationDays : null) ?? ap.durationDays ?? 0);
+        const durationDays = Number(planSnap.durationDays != null ? planSnap.durationDays : ap.durationDays ?? 0);
         await distributeTeamLevelIncomeFromDailyRoi(docSnap.id, userId, daily, planSnap, {
             startedAt,
             now,

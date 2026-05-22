@@ -585,17 +585,74 @@ function teamLevelPayoutWithinDownlinePlanWindow(
   return elapsed < maxPayDays
 }
 
+function teamMatrixHasPayablePercent(rows: FrozenTeamRow[]): boolean {
+  return rows.some((r) => r && Number(r.percent) > 0)
+}
+
+/**
+ * Team matrix for a downline package: frozen `planSnapshot.teamLevels` first, then the member’s
+ * `rankCompensationSnapshot.teamLevels` (latest activation capture).
+ */
+async function resolveTeamFrozenForPackagePayout(
+  downlineUid: string,
+  planSnap: Record<string, unknown>,
+): Promise<FrozenTeamRow[]> {
+  const fromPkg = Array.isArray(planSnap.teamLevels) ? (planSnap.teamLevels as FrozenTeamRow[]) : []
+  if (teamMatrixHasPayablePercent(fromPkg)) return fromPkg
+
+  const uSnap = await db.collection(COL_USERS).doc(downlineUid).get()
+  if (!uSnap.exists) return fromPkg
+  const rankSnap = uSnap.data()?.rankCompensationSnapshot as Record<string, unknown> | undefined
+  const fromUser = Array.isArray(rankSnap?.teamLevels) ? (rankSnap.teamLevels as FrozenTeamRow[]) : []
+  if (teamMatrixHasPayablePercent(fromUser)) return fromUser
+  return fromPkg.length > 0 ? fromPkg : fromUser
+}
+
+/** Build plan snapshot for ROI/team when legacy `activePackages` rows omit `planSnapshot`. */
+function effectivePlanSnapshotForActivePackage(
+  ap: Record<string, unknown>,
+  userData: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const existing = ap.planSnapshot
+  if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
+    return { ...(existing as Record<string, unknown>) }
+  }
+  const rankSnap = userData?.rankCompensationSnapshot as Record<string, unknown> | undefined
+  const wMult = Number(
+    ap.frozenWorkingCapMultiplier ??
+      (rankSnap?.workingIncomeCapMultiplier as number | undefined) ??
+      3,
+  )
+  const nwMult = Number(
+    ap.frozenNonWorkingCapMultiplier ??
+      (rankSnap?.nonWorkingIncomeCapMultiplier as number | undefined) ??
+      2,
+  )
+  const amount = Number(ap.amount ?? 0)
+  return {
+    roiPercent: Number(ap.roiPercent ?? 0),
+    durationDays: Number(ap.durationDays ?? 0),
+    planType: String(ap.planType ?? 'daily'),
+    teamLevels: Array.isArray(rankSnap?.teamLevels) ? rankSnap!.teamLevels : [],
+    nonWorkingIncomeCapMultiplier: nwMult,
+    workingIncomeCapMultiplier: wMult,
+    workingCap: amount * Math.max(wMult, 0),
+    stopAllIncomeWhenWorkingCapReached: rankSnap?.stopAllIncomeWhenWorkingCapReached === true,
+  }
+}
+
 /** Split of downline daily ROI to uplines — % × credited ROI; each pay min(gross, sponsor’s working room left). */
 async function distributeTeamLevelIncomeFromDailyRoi(
   downlineActivePackageId: string,
   downlineUid: string,
   dailyRoiCredited: number,
-  planSnap: Record<string, unknown> | null,
+  planSnap: Record<string, unknown>,
   payoutClock: { startedAt: Timestamp; now: Timestamp; durationDays: number },
 ) {
-  if (dailyRoiCredited <= 1e-12 || !planSnap) return
+  if (dailyRoiCredited <= 1e-12) return
 
-  const teamFrozen = Array.isArray(planSnap.teamLevels) ? (planSnap.teamLevels as FrozenTeamRow[]) : []
+  const teamFrozen = await resolveTeamFrozenForPackagePayout(downlineUid, planSnap)
+  if (!teamMatrixHasPayablePercent(teamFrozen)) return
   const activeCache = new Map<string, boolean>()
   const uplHasActive = async (uid: string) => {
     const k = String(uid ?? '').trim()
@@ -654,6 +711,7 @@ async function distributeTeamLevelIncomeFromDailyRoi(
               level: row.level,
               amount: payAmt,
               activePackageId: downlineActivePackageId,
+              downlinePackageAmount: Number(planSnap.packageAmount ?? planSnap.activationAmount ?? 0),
               sourceDailyRoi: dailyRoiCredited,
               distribution: 'daily_roi_share',
               /** Upline clients cannot read downline `activePackages`; denorm for dashboard “remaining days”. */
@@ -2858,7 +2916,6 @@ export const processDailyRoi = onSchedule(
     }
 
     const amount = Number(ap.amount ?? 0)
-    const planSnap = (ap.planSnapshot ?? null) as Record<string, unknown> | null
     const userId = userIdEarly
 
     const userRow = await db.collection(COL_USERS).doc(userId).get()
@@ -2866,12 +2923,15 @@ export const processDailyRoi = onSchedule(
       continue
     }
 
+    const userData = userRow.data() as Record<string, unknown>
+    const planSnap = effectivePlanSnapshotForActivePackage(ap, userData)
+
     if (await shouldSkipRoiForPackageOwner(userId, planSnap)) {
       continue
     }
 
     const roiPercent = Number(
-      (planSnap && planSnap.roiPercent != null ? planSnap.roiPercent : null) ?? ap.roiPercent ?? 0,
+      planSnap.roiPercent != null ? planSnap.roiPercent : ap.roiPercent ?? 0,
     )
     const nonWorkingPaid = Number(ap.nonWorkingPaid ?? 0)
     const nwMult = Number(
@@ -2886,9 +2946,7 @@ export const processDailyRoi = onSchedule(
       continue
     }
 
-    const planTypeStr = String(
-      (planSnap && planSnap.planType != null ? planSnap.planType : null) ?? ap.planType ?? 'daily',
-    ).toLowerCase()
+    const planTypeStr = String(planSnap.planType != null ? planSnap.planType : ap.planType ?? 'daily').toLowerCase()
     const compound = planTypeStr === 'compounding'
     const bal = compound ? Number(ap.compoundingBalance ?? amount) : amount
     const rawDaily = (bal * roiPercent) / 100
@@ -2921,7 +2979,7 @@ export const processDailyRoi = onSchedule(
 
     const startedAt = ap.startedAt as Timestamp
     const durationDays = Number(
-      (planSnap && planSnap.durationDays != null ? planSnap.durationDays : null) ?? ap.durationDays ?? 0,
+      planSnap.durationDays != null ? planSnap.durationDays : ap.durationDays ?? 0,
     )
     await distributeTeamLevelIncomeFromDailyRoi(docSnap.id, userId, daily, planSnap, {
       startedAt,
