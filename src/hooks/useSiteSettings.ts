@@ -190,7 +190,7 @@ export function useSiteSettings() {
           publicContactFooterNote:
             d.publicContactFooterNote != null ? String(d.publicContactFooterNote) : undefined,
           referralWhatsappShareTemplate:
-            d.referralWhatsappShareTemplate != null
+            d.referralWhatsappShareTemplate !== undefined && d.referralWhatsappShareTemplate !== null
               ? String(d.referralWhatsappShareTemplate)
               : undefined,
           referralWhatsappShareImageUrl:

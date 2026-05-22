@@ -10,7 +10,6 @@ import {
   DEFAULT_REFERRAL_WHATSAPP_TEMPLATE,
   REFERRAL_LINK_PLACEHOLDER,
   buildReferralWhatsappMessage,
-  normalizeReferralWhatsappTemplate,
   openReferralWhatsappShare,
 } from '@/lib/referralShareMessage'
 
@@ -24,7 +23,12 @@ export function AdminReferralSharePage() {
 
   useEffect(() => {
     if (!ready) return
-    setTemplate(normalizeReferralWhatsappTemplate(data.referralWhatsappShareTemplate))
+    const raw = data.referralWhatsappShareTemplate
+    if (raw === undefined || raw === null) {
+      setTemplate(DEFAULT_REFERRAL_WHATSAPP_TEMPLATE)
+    } else {
+      setTemplate(String(raw))
+    }
     setImageUrl(String(data.referralWhatsappShareImageUrl ?? '').trim())
   }, [data, ready])
 
@@ -55,7 +59,7 @@ export function AdminReferralSharePage() {
     try {
       await save(
         {
-          referralWhatsappShareTemplate: normalizeReferralWhatsappTemplate(template),
+          referralWhatsappShareTemplate: template.trim(),
           referralWhatsappShareImageUrl: imageUrl.trim() || null,
         },
         'adminReferralShareSave',
@@ -84,9 +88,9 @@ export function AdminReferralSharePage() {
         <h1 className="text-xl font-bold text-[#e4e4e7] sm:text-2xl">Referral WhatsApp message</h1>
         <p className="text-sm text-[#9898a8]">
           Members use this text when they tap <strong className="text-[#e4e4e7]">Share on WhatsApp</strong> on the
-          dashboard and referral link page. Put{' '}
-          <code className="text-[#f5e6a8]">{REFERRAL_LINK_PLACEHOLDER}</code> where each member&apos;s personal signup
-          URL should appear.
+          dashboard and referral link page. Clear all text and save to share <strong className="text-[#e4e4e7]">only the
+          referral link</strong>. Use <code className="text-[#f5e6a8]">{REFERRAL_LINK_PLACEHOLDER}</code> in the
+          template where the personal signup URL should go.
         </p>
       </div>
 
@@ -100,11 +104,14 @@ export function AdminReferralSharePage() {
             spellCheck={false}
           />
           <p className="mt-2 text-[10px] text-[#6b6b7c]">
-            WhatsApp supports *bold* with asterisks. Line breaks are preserved. If you omit{' '}
-            {REFERRAL_LINK_PLACEHOLDER}, the link is appended at the end automatically.
+            WhatsApp supports *bold* with asterisks. Line breaks are preserved. Empty template = link only. If you
+            add text without {REFERRAL_LINK_PLACEHOLDER}, the link is appended at the end.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" onClick={() => setTemplate('')}>
+            Link only (clear message)
+          </Button>
           <Button
             type="button"
             variant="outline"
@@ -173,7 +180,7 @@ export function AdminReferralSharePage() {
         <pre
           className="max-h-72 overflow-auto whitespace-pre-wrap rounded border border-[#333] bg-[#111] p-3 text-[12px] text-[#ccc]"
         >
-          {previewMessage}
+          {previewMessage || '(link only — no extra text)'}
         </pre>
         <Button
           type="button"

@@ -24,17 +24,27 @@ ${REFERRAL_LINK_PLACEHOLDER}
 Start your financial freedom journey today!
 Let's grow together!`
 
+/** Admin saved `''` → link only; unset field → default marketing template. */
+export function resolveReferralWhatsappTemplate(raw: unknown): string {
+  if (raw === null || raw === undefined) return DEFAULT_REFERRAL_WHATSAPP_TEMPLATE
+  if (raw === '') return ''
+  const s = String(raw).trim()
+  if (s.length === 0) return ''
+  return s
+}
+
+/** @deprecated Use resolveReferralWhatsappTemplate */
 export function normalizeReferralWhatsappTemplate(raw: unknown): string {
-  const s = String(raw ?? '').trim()
-  return s.length > 0 ? s : DEFAULT_REFERRAL_WHATSAPP_TEMPLATE
+  return resolveReferralWhatsappTemplate(raw)
 }
 
 export function buildReferralWhatsappMessage(
-  template: string,
+  template: unknown,
   referralLink: string,
 ): string {
   const link = referralLink.trim()
-  const body = normalizeReferralWhatsappTemplate(template)
+  const body = resolveReferralWhatsappTemplate(template)
+  if (!body) return link
   if (body.includes(REFERRAL_LINK_PLACEHOLDER)) {
     return body.split(REFERRAL_LINK_PLACEHOLDER).join(link)
   }
@@ -45,10 +55,11 @@ export function referralWhatsappShareFromSettings(
   settings: Pick<SiteSettings, 'referralWhatsappShareTemplate'>,
   referralLink: string,
 ): string {
-  return buildReferralWhatsappMessage(
-    normalizeReferralWhatsappTemplate(settings.referralWhatsappShareTemplate),
-    referralLink,
-  )
+  return buildReferralWhatsappMessage(settings.referralWhatsappShareTemplate, referralLink)
+}
+
+export function isReferralWhatsappLinkOnly(settings: Pick<SiteSettings, 'referralWhatsappShareTemplate'>): boolean {
+  return resolveReferralWhatsappTemplate(settings.referralWhatsappShareTemplate) === ''
 }
 
 export function referralWhatsappImageUrl(
