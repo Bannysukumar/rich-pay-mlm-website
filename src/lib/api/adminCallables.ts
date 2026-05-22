@@ -1,4 +1,5 @@
 import { getHttpsCallable } from '@/lib/api/httpsCallableHelper'
+import type { ReferralCampaignCompletionsResult } from '@/types/models'
 
 /** Must match `ADMIN_ADJUST_BALANCE_FIELDS` in Cloud Functions `adminAdjustMemberBalances`. */
 export type AdminAdjustMemberBalanceField =
@@ -62,4 +63,13 @@ export async function adminBroadcastNotificationCallable(payload: { title: strin
   const fn = getHttpsCallable('adminBroadcastNotification')
   const res = await fn(payload)
   return res.data as { sent: number }
+}
+
+export async function adminListReferralCampaignCompletionsCallable(payload: {
+  campaignId: string
+  tierId?: string
+}): Promise<ReferralCampaignCompletionsResult> {
+  const fn = getHttpsCallable('adminListReferralCampaignCompletions')
+  const res = await fn(payload)
+  return res.data as ReferralCampaignCompletionsResult
 }

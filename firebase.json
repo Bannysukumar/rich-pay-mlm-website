@@ -99,6 +99,10 @@
         "function": { "functionName": "dismissReferralCampaignBanner", "region": "us-central1" }
       },
       {
+        "source": "/api/call/adminListReferralCampaignCompletions",
+        "function": { "functionName": "adminListReferralCampaignCompletions", "region": "us-central1" }
+      },
+      {
         "source": "/api/call/adminDeleteMember",
         "function": { "functionName": "adminDeleteMember", "region": "us-central1" }
       },

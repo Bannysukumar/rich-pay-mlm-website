@@ -2835,6 +2835,133 @@ export const getReferralCampaignProgress = onCall(callableRuntimeOpts, async (re
   }
 })
 
+type DirectRefForCampaign = { uid: string; createdAt: number }
+
+function countQualifyingDirectsIndexed(
+  sponsorUid: string,
+  campaign: { startAt: number; endAt: number },
+  tier: ReferralCampaignTierRow,
+  directsBySponsor: Map<string, DirectRefForCampaign[]>,
+  activeUserIds: Set<string>,
+): number {
+  const directs = directsBySponsor.get(sponsorUid) ?? []
+  let count = 0
+  const inWindow = tier.directMustRegisterInCampaignWindow !== false
+  const requireActive = tier.requireDirectActivePackage !== false
+  for (const d of directs) {
+    if (inWindow && (d.createdAt < campaign.startAt || d.createdAt > campaign.endAt)) continue
+    if (requireActive && !activeUserIds.has(d.uid)) continue
+    count++
+  }
+  return count
+}
+
+/** Admin: members who completed each reward tier for a campaign. */
+export const adminListReferralCampaignCompletions = onCall(
+  { ...callableRuntimeOpts, memory: '512MiB' as const, timeoutSeconds: 300 },
+  async (request) => {
+    if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')
+    await assertFirestoreAdmin(request.auth.uid)
+
+    const campaignId = String((request.data as { campaignId?: string })?.campaignId ?? '').trim()
+    const tierIdFilter = String((request.data as { tierId?: string })?.tierId ?? '').trim()
+    if (!campaignId) throw new HttpsError('invalid-argument', 'campaignId is required')
+
+    const cSnap = await db.collection(COL_REFERRAL_CAMPAIGNS).doc(campaignId).get()
+    if (!cSnap.exists) throw new HttpsError('not-found', 'Campaign not found')
+    const campaign = mapReferralCampaignDoc(campaignId, cSnap.data() as Record<string, unknown>)
+
+    const [usersSnap, activeSnap] = await Promise.all([
+      db.collection(COL_USERS).get(),
+      db.collection(COL_ACTIVE).where('status', '==', 'active').get(),
+    ])
+
+    const activeUserIds = new Set<string>()
+    const maxPrincipalByUser = new Map<string, number>()
+    for (const d of activeSnap.docs) {
+      const uid = String(d.data().userId ?? '')
+      if (!uid) continue
+      activeUserIds.add(uid)
+      const amt = Number(d.data().amount ?? 0)
+      maxPrincipalByUser.set(uid, Math.max(maxPrincipalByUser.get(uid) ?? 0, amt))
+    }
+
+    const directsBySponsor = new Map<string, DirectRefForCampaign[]>()
+    const members: Array<{ uid: string; data: Record<string, unknown> }> = []
+    for (const d of usersSnap.docs) {
+      const data = d.data() as Record<string, unknown>
+      if (String(data.role ?? '') === 'admin') continue
+      members.push({ uid: d.id, data })
+      const sponsorUid = String(data.sponsorUid ?? '').trim()
+      if (!sponsorUid) continue
+      const list = directsBySponsor.get(sponsorUid) ?? []
+      list.push({ uid: d.id, createdAt: Number(data.createdAt ?? 0) })
+      directsBySponsor.set(sponsorUid, list)
+    }
+
+    const completions: Array<{
+      uid: string
+      username: string
+      fullName: string
+      email: string
+      phone: string
+      tierId: string
+      rewardLabel: string
+      rewardSubtitle?: string
+      qualifyingDirectCount: number
+      memberPrincipal: number
+    }> = []
+
+    for (const { uid, data } of members) {
+      const memberPrincipal = maxPrincipalByUser.get(uid) ?? 0
+      const hasActive = activeUserIds.has(uid)
+      for (const tier of campaign.tiers) {
+        if (tierIdFilter && tier.id !== tierIdFilter) continue
+        const qualifyingDirectCount = countQualifyingDirectsIndexed(
+          uid,
+          campaign,
+          tier,
+          directsBySponsor,
+          activeUserIds,
+        )
+        const memberJoinMet = memberJoinRequirementMet(tier, memberPrincipal, hasActive)
+        if (qualifyingDirectCount >= tier.requiredDirectReferrals && memberJoinMet) {
+          completions.push({
+            uid,
+            username: String(data.username ?? ''),
+            fullName: String(data.fullName ?? ''),
+            email: String(data.email ?? ''),
+            phone: String(data.phone ?? ''),
+            tierId: tier.id,
+            rewardLabel: tier.rewardLabel,
+            rewardSubtitle: tier.rewardSubtitle,
+            qualifyingDirectCount,
+            memberPrincipal,
+          })
+        }
+      }
+    }
+
+    completions.sort(
+      (a, b) =>
+        a.tierId.localeCompare(b.tierId) ||
+        a.username.localeCompare(b.username, undefined, { numeric: true }),
+    )
+
+    await audit(request.auth.uid, 'adminListReferralCampaignCompletions', {
+      campaignId,
+      tierIdFilter: tierIdFilter || undefined,
+      total: completions.length,
+    })
+
+    return {
+      campaign: { id: campaign.id, title: campaign.title },
+      completions,
+      total: completions.length,
+    }
+  },
+)
+
 /** Persist banner dismiss on the user profile (Firestore rules block direct member writes). */
 export const dismissReferralCampaignBanner = onCall(callableRuntimeOpts, async (request) => {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')

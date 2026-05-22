@@ -323,3 +323,23 @@ export interface ReferralCampaignProgressResult {
   memberPrincipal: number
   tiers: ReferralCampaignTierProgress[]
 }
+
+/** Row from `adminListReferralCampaignCompletions` for fulfilled reward tiers. */
+export interface ReferralCampaignCompletionRow {
+  uid: string
+  username: string
+  fullName: string
+  email: string
+  phone: string
+  tierId: string
+  rewardLabel: string
+  rewardSubtitle?: string
+  qualifyingDirectCount: number
+  memberPrincipal: number
+}
+
+export interface ReferralCampaignCompletionsResult {
+  campaign: { id: string; title: string }
+  completions: ReferralCampaignCompletionRow[]
+  total: number
+}

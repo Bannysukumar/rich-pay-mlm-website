@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.dismissReferralCampaignBanner = exports.getReferralCampaignProgress = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.requestPasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
+exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.dismissReferralCampaignBanner = exports.adminListReferralCampaignCompletions = exports.getReferralCampaignProgress = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.requestPasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
 const node_crypto_1 = require("node:crypto");
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -2451,6 +2451,99 @@ exports.getReferralCampaignProgress = (0, https_1.onCall)(callableRuntimeOpts, a
         qualifyingDirectCount: topDirects,
         memberPrincipal,
         tiers: tiersOut,
+    };
+});
+function countQualifyingDirectsIndexed(sponsorUid, campaign, tier, directsBySponsor, activeUserIds) {
+    const directs = directsBySponsor.get(sponsorUid) ?? [];
+    let count = 0;
+    const inWindow = tier.directMustRegisterInCampaignWindow !== false;
+    const requireActive = tier.requireDirectActivePackage !== false;
+    for (const d of directs) {
+        if (inWindow && (d.createdAt < campaign.startAt || d.createdAt > campaign.endAt))
+            continue;
+        if (requireActive && !activeUserIds.has(d.uid))
+            continue;
+        count++;
+    }
+    return count;
+}
+/** Admin: members who completed each reward tier for a campaign. */
+exports.adminListReferralCampaignCompletions = (0, https_1.onCall)({ ...callableRuntimeOpts, memory: '512MiB', timeoutSeconds: 300 }, async (request) => {
+    if (!request.auth?.uid)
+        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
+    await assertFirestoreAdmin(request.auth.uid);
+    const campaignId = String(request.data?.campaignId ?? '').trim();
+    const tierIdFilter = String(request.data?.tierId ?? '').trim();
+    if (!campaignId)
+        throw new https_1.HttpsError('invalid-argument', 'campaignId is required');
+    const cSnap = await db.collection(COL_REFERRAL_CAMPAIGNS).doc(campaignId).get();
+    if (!cSnap.exists)
+        throw new https_1.HttpsError('not-found', 'Campaign not found');
+    const campaign = mapReferralCampaignDoc(campaignId, cSnap.data());
+    const [usersSnap, activeSnap] = await Promise.all([
+        db.collection(COL_USERS).get(),
+        db.collection(COL_ACTIVE).where('status', '==', 'active').get(),
+    ]);
+    const activeUserIds = new Set();
+    const maxPrincipalByUser = new Map();
+    for (const d of activeSnap.docs) {
+        const uid = String(d.data().userId ?? '');
+        if (!uid)
+            continue;
+        activeUserIds.add(uid);
+        const amt = Number(d.data().amount ?? 0);
+        maxPrincipalByUser.set(uid, Math.max(maxPrincipalByUser.get(uid) ?? 0, amt));
+    }
+    const directsBySponsor = new Map();
+    const members = [];
+    for (const d of usersSnap.docs) {
+        const data = d.data();
+        if (String(data.role ?? '') === 'admin')
+            continue;
+        members.push({ uid: d.id, data });
+        const sponsorUid = String(data.sponsorUid ?? '').trim();
+        if (!sponsorUid)
+            continue;
+        const list = directsBySponsor.get(sponsorUid) ?? [];
+        list.push({ uid: d.id, createdAt: Number(data.createdAt ?? 0) });
+        directsBySponsor.set(sponsorUid, list);
+    }
+    const completions = [];
+    for (const { uid, data } of members) {
+        const memberPrincipal = maxPrincipalByUser.get(uid) ?? 0;
+        const hasActive = activeUserIds.has(uid);
+        for (const tier of campaign.tiers) {
+            if (tierIdFilter && tier.id !== tierIdFilter)
+                continue;
+            const qualifyingDirectCount = countQualifyingDirectsIndexed(uid, campaign, tier, directsBySponsor, activeUserIds);
+            const memberJoinMet = memberJoinRequirementMet(tier, memberPrincipal, hasActive);
+            if (qualifyingDirectCount >= tier.requiredDirectReferrals && memberJoinMet) {
+                completions.push({
+                    uid,
+                    username: String(data.username ?? ''),
+                    fullName: String(data.fullName ?? ''),
+                    email: String(data.email ?? ''),
+                    phone: String(data.phone ?? ''),
+                    tierId: tier.id,
+                    rewardLabel: tier.rewardLabel,
+                    rewardSubtitle: tier.rewardSubtitle,
+                    qualifyingDirectCount,
+                    memberPrincipal,
+                });
+            }
+        }
+    }
+    completions.sort((a, b) => a.tierId.localeCompare(b.tierId) ||
+        a.username.localeCompare(b.username, undefined, { numeric: true }));
+    await audit(request.auth.uid, 'adminListReferralCampaignCompletions', {
+        campaignId,
+        tierIdFilter: tierIdFilter || undefined,
+        total: completions.length,
+    });
+    return {
+        campaign: { id: campaign.id, title: campaign.title },
+        completions,
+        total: completions.length,
     };
 });
 /** Persist banner dismiss on the user profile (Firestore rules block direct member writes). */

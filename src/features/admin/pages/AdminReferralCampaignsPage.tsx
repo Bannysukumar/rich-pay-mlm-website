@@ -4,10 +4,16 @@ import toast from 'react-hot-toast'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input, Label } from '@/components/ui/Input'
+import { adminListReferralCampaignCompletionsCallable } from '@/lib/api/adminCallables'
+import { getCallableErrorMessage } from '@/lib/api/callableErrorMessage'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 import { pushAuditLog } from '@/lib/admin/pushAuditLog'
-import type { ReferralCampaign, ReferralCampaignTier } from '@/types/models'
+import type {
+  ReferralCampaign,
+  ReferralCampaignCompletionRow,
+  ReferralCampaignTier,
+} from '@/types/models'
 
 const DEFAULT_CAMPAIGN_ID = 'flyer-promo'
 
@@ -71,6 +77,10 @@ export function AdminReferralCampaignsPage() {
   const [endLocal, setEndLocal] = useState('')
   const [busy, setBusy] = useState(false)
   const [ready, setReady] = useState(false)
+  const [completionsLoading, setCompletionsLoading] = useState(false)
+  const [completions, setCompletions] = useState<ReferralCampaignCompletionRow[]>([])
+  const [completionsLoaded, setCompletionsLoaded] = useState(false)
+  const [completionTierFilter, setCompletionTierFilter] = useState('')
 
   useEffect(() => {
     void getDocs(collection(db, COLLECTIONS.referralCampaigns)).then((snap) => {
@@ -141,6 +151,42 @@ export function AdminReferralCampaignsPage() {
     if (!form.startAt || !form.endAt) return 'Set start and end'
     return `${new Date(form.startAt).toLocaleString()} → ${new Date(form.endAt).toLocaleString()}`
   }, [form.startAt, form.endAt])
+
+  const completionsByTier = useMemo(() => {
+    const map = new Map<string, ReferralCampaignCompletionRow[]>()
+    for (const row of completions) {
+      const key = row.tierId
+      const list = map.get(key) ?? []
+      list.push(row)
+      map.set(key, list)
+    }
+    return map
+  }, [completions])
+
+  const loadCompletions = async () => {
+    setCompletionsLoading(true)
+    try {
+      const res = await adminListReferralCampaignCompletionsCallable({
+        campaignId: selectedId,
+        tierId: completionTierFilter || undefined,
+      })
+      setCompletions(res.completions)
+      setCompletionsLoaded(true)
+      toast.success(`Found ${res.total} completed reward${res.total === 1 ? '' : 's'}`)
+    } catch (err) {
+      toast.error(
+        getCallableErrorMessage(err) || 'Could not load — deploy adminListReferralCampaignCompletions',
+      )
+      setCompletions([])
+    } finally {
+      setCompletionsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    setCompletions([])
+    setCompletionsLoaded(false)
+  }, [selectedId])
 
   const persist = async () => {
     setBusy(true)
@@ -455,6 +501,99 @@ export function AdminReferralCampaignsPage() {
             Bump version (re-show for users who dismissed)
           </Button>
         </div>
+      </Card>
+
+      <Card className="space-y-4 p-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-medium text-[#d4af37]">Completed rewards</h2>
+            <p className="mt-1 text-sm text-[#a8a8b8]">
+              Members who finished a tier for this campaign (User ID, name, email, mobile).
+            </p>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <Label>Filter tier</Label>
+              <select
+                className="mt-1 rounded border border-[#444] bg-[#1a1a1a] px-3 py-2 text-sm text-white"
+                value={completionTierFilter}
+                onChange={(e) => setCompletionTierFilter(e.target.value)}
+              >
+                <option value="">All tiers</option>
+                {form.tiers.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.rewardLabel}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={completionsLoading}
+              onClick={() => void loadCompletions()}
+            >
+              {completionsLoading ? 'Loading…' : completionsLoaded ? 'Refresh list' : 'Load completed members'}
+            </Button>
+          </div>
+        </div>
+
+        {!completionsLoaded ? (
+          <p className="text-sm text-[#888]">Click “Load completed members” to scan who qualified for each reward.</p>
+        ) : completions.length === 0 ? (
+          <p className="text-sm text-[#888]">No members have completed a reward tier for this campaign yet.</p>
+        ) : (
+          <div className="space-y-6">
+            {form.tiers
+              .filter((t) => !completionTierFilter || t.id === completionTierFilter)
+              .map((tier) => {
+                const rows = completionsByTier.get(tier.id) ?? []
+                if (rows.length === 0) return null
+                return (
+                  <div key={tier.id} className="space-y-2">
+                    <h3 className="text-sm font-semibold text-[#5cb85c]">
+                      ✓ {tier.rewardSubtitle ? `${tier.rewardSubtitle} → ` : ''}
+                      {tier.rewardLabel}
+                      <span className="ml-2 font-normal text-[#aaa]">({rows.length} member{rows.length === 1 ? '' : 's'})</span>
+                    </h3>
+                    <div className="admin-panel-sheet overflow-hidden p-0">
+                      <div className="max-w-[100vw] overflow-x-auto">
+                        <table className="w-full min-w-[920px] text-left text-[12px] text-[#c4c4ce]">
+                          <thead className="border-b border-[rgba(212,175,55,0.15)] bg-[rgba(212,175,55,0.04)]">
+                            <tr className="text-[10px] font-bold uppercase tracking-wider text-[#6b6b7c]">
+                              <th className="px-3 py-2.5 pl-4">User ID</th>
+                              <th className="px-3 py-2.5">Name</th>
+                              <th className="px-3 py-2.5">Email</th>
+                              <th className="px-3 py-2.5">Mobile</th>
+                              <th className="px-3 py-2.5">Auth UID</th>
+                              <th className="px-3 py-2.5">Directs</th>
+                              <th className="px-3 py-2.5 pr-4">Package $</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map((row) => (
+                              <tr
+                                key={`${row.tierId}-${row.uid}`}
+                                className="border-b border-[rgba(212,175,55,0.08)] hover:bg-[rgba(212,175,55,0.03)]"
+                              >
+                                <td className="px-3 py-2.5 pl-4 font-medium text-[#e4e4e7]">{row.username || '—'}</td>
+                                <td className="px-3 py-2.5">{row.fullName || '—'}</td>
+                                <td className="px-3 py-2.5">{row.email || '—'}</td>
+                                <td className="px-3 py-2.5">{row.phone || '—'}</td>
+                                <td className="px-3 py-2.5 font-mono text-[10px] text-[#9898a8]">{row.uid}</td>
+                                <td className="px-3 py-2.5">{row.qualifyingDirectCount}</td>
+                                <td className="px-3 py-2.5 pr-4">{row.memberPrincipal}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+          </div>
+        )}
       </Card>
 
       <Button type="button" disabled={busy} onClick={() => void persist()}>
