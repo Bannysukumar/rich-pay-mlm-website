@@ -1,14 +1,12 @@
 import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore'
 import { useEffect, useMemo, useState } from 'react'
 import { FaWhatsapp } from 'react-icons/fa'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { CopySimple, Link as LinkIcon } from '@phosphor-icons/react'
 import toast from 'react-hot-toast'
 import { useAuthState } from '@/hooks/useAuth'
 import { useSiteSettings } from '@/hooks/useSiteSettings'
-import { getCallableErrorMessage } from '@/lib/api/callableErrorMessage'
 import {
-  dismissReferralCampaignBannerCallable,
   getReferralCampaignProgressCallable,
 } from '@/lib/api/referralCampaignCallables'
 import type { ReferralCampaignProgressResult, UserProfile } from '@/types/models'
@@ -176,6 +174,7 @@ function referralBase(): string {
 export function DashboardHome() {
   const { profile, firebaseUid } = useAuthState()
   const { settings } = useSiteSettings()
+  const location = useLocation()
   const [activePackageTotal, setActivePackageTotal] = useState<number | undefined>(undefined)
   const [maxActivePrincipal, setMaxActivePrincipal] = useState<number | undefined>(undefined)
   const [pkgIncomeRows, setPkgIncomeRows] = useState<PkgIncomeRow[]>([])
@@ -313,37 +312,28 @@ export function DashboardHome() {
   const showCampaignBanner = useMemo(() => {
     const c = campaignProgress?.campaign
     if (!c?.bannerEnabled) return false
-    const hasContent = Boolean(c.bannerImageUrl?.trim() || c.bannerMessage.trim())
-    if (!hasContent) return false
-    const dismissed = profile?.dismissedReferralCampaignBanners?.[c.id] ?? 0
-    return dismissed < (c.bannerDismissVersion ?? 0)
-  }, [campaignProgress, profile?.dismissedReferralCampaignBanners])
+    return Boolean(c.bannerImageUrl?.trim() || c.bannerMessage.trim())
+  }, [campaignProgress])
 
-  const [bannerPopupDismissed, setBannerPopupDismissed] = useState(false)
+  const [bannerPopupOpen, setBannerPopupOpen] = useState(false)
 
   useEffect(() => {
-    if (showCampaignBanner) setBannerPopupDismissed(false)
-  }, [
-    showCampaignBanner,
-    campaignProgress?.campaign?.id,
-    campaignProgress?.campaign?.bannerDismissVersion,
-  ])
+    if (location.pathname !== '/dashboard') return
+    if (!showCampaignBanner || !campaignProgress?.campaign) return
+    setBannerPopupOpen(true)
+  }, [location.pathname, location.key, showCampaignBanner, campaignProgress?.campaign?.id])
 
-  const dismissCampaignBanner = async () => {
-    const id = campaignProgress?.campaign?.id
-    if (!id) return
-    setBannerPopupDismissed(true)
-    try {
-      await dismissReferralCampaignBannerCallable(id)
-      toast.success('Banner closed')
-    } catch (err) {
-      setBannerPopupDismissed(false)
-      toast.error(getCallableErrorMessage(err) || 'Could not dismiss banner')
-    }
+  const closeCampaignBanner = () => {
+    setBannerPopupOpen(false)
+    window.setTimeout(() => {
+      document.getElementById('referral-campaign-rewards')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 100)
   }
 
-  const showCampaignPopup =
-    showCampaignBanner && !bannerPopupDismissed && campaignProgress?.campaign != null
+  const showCampaignPopup = bannerPopupOpen && showCampaignBanner && campaignProgress?.campaign != null
 
   const copy = async () => {
     if (!refLink) return
@@ -460,7 +450,7 @@ export function DashboardHome() {
       {showCampaignPopup ? (
         <ReferralCampaignBannerModal
           campaign={campaignProgress!.campaign!}
-          onDismiss={() => void dismissCampaignBanner()}
+          onDismiss={closeCampaignBanner}
         />
       ) : null}
 
@@ -624,8 +614,12 @@ export function DashboardHome() {
         <StatGrid items={row4} />
       </div>
 
-      {campaignProgress?.campaign && (campaignProgress.tiers?.length ?? 0) > 0 ? (
-        <section className="mt-4 mb-4 rounded-3 border border-secondary p-4" style={{ borderColor: 'rgba(212,175,55,0.2)' }}>
+      {campaignProgress?.campaign ? (
+        <section
+          id="referral-campaign-rewards"
+          className="mt-4 mb-4 rounded-3 border border-secondary p-4 scroll-margin-top"
+          style={{ borderColor: 'rgba(212,175,55,0.2)', scrollMarginTop: '5rem' }}
+        >
           <h3 className="mb-1" style={{ color: '#d4af37', fontWeight: 600 }}>
             {campaignProgress.campaign.title}
           </h3>
@@ -637,7 +631,8 @@ export function DashboardHome() {
           <p className="small mb-3" style={{ color: '#888' }}>
             Promo ends {new Date(campaignProgress.campaign.endAt).toLocaleString()}
           </p>
-          {campaignProgress.tiers.map((tier) => {
+          {(campaignProgress.tiers?.length ?? 0) > 0 ? (
+            campaignProgress.tiers.map((tier) => {
             const bars = referralTierBarHud(tier)
             const barFill = tier.completed ? '#5cb85c' : '#d4af37'
             const barBg = tier.completed
@@ -715,7 +710,10 @@ export function DashboardHome() {
                 </p>
               </div>
             )
-          })}
+          })
+          ) : (
+            <p className="small mb-0 text-secondary">Reward tiers will appear here when configured by admin.</p>
+          )}
         </section>
       ) : null}
 

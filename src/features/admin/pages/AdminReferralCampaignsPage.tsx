@@ -489,8 +489,8 @@ export function AdminReferralCampaignsPage() {
         <h2 className="text-lg font-medium text-[#d4af37]">Dashboard popup banner</h2>
         <p className="text-sm text-[#9898a8]">
           When the campaign is <strong className="text-[#e4e4e7]">Active</strong> and inside the date window, members see a
-          popup with your image and/or message when they open the dashboard. They can close it; use{' '}
-          <strong className="text-[#e4e4e7]">Bump version</strong> to show it again after a dismiss.
+          popup with your image and/or message every time they open the dashboard (no permanent dismiss).
+          Closing the popup scrolls them to the <strong className="text-[#e4e4e7]">New flyer rewards</strong> section below.
         </p>
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -565,7 +565,7 @@ export function AdminReferralCampaignsPage() {
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-[#aaa]">Dismiss version: {form.bannerDismissVersion}</span>
           <Button type="button" variant="outline" onClick={bumpBannerVersion}>
-            Bump version (re-show for users who dismissed)
+            Bump version (legacy — optional audit note when banner content changes)
           </Button>
         </div>
       </Card>

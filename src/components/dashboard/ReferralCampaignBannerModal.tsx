@@ -38,7 +38,7 @@ export function ReferralCampaignBannerModal({ campaign, onDismiss }: Props) {
             <button
               type="button"
               className="btn-close btn-close-white"
-              aria-label="Close banner"
+              aria-label="View rewards"
               onClick={onDismiss}
             />
           </div>
@@ -65,10 +65,11 @@ export function ReferralCampaignBannerModal({ campaign, onDismiss }: Props) {
           <div className="modal-footer border-secondary border-opacity-25 justify-content-center">
             <button
               type="button"
-              className="btn btn-outline-light px-4"
+              className="btn px-4"
+              style={{ background: '#d4af37', color: '#1a1a1a', fontWeight: 600 }}
               onClick={onDismiss}
             >
-              Close
+              View rewards
             </button>
           </div>
         </div>
