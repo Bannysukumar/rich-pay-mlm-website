@@ -5,7 +5,7 @@ import { PublicNavbar } from '@/features/landing/PublicNavbar'
 import '@/features/landing/landing.css'
 import { isRegisterSuccessState } from './registerSuccessState'
 
-const SITE_HOST = 'www.richpay.world'
+const SITE_HOST = 'richpay.live'
 
 export function RegisterSuccessPage() {
   const { state } = useLocation()
