@@ -26,6 +26,7 @@ import { AdminReportSponsorBonusPage } from '@/features/admin/pages/AdminReportS
 import { AdminReportTeamLevelIncomePage } from '@/features/admin/pages/AdminReportTeamLevelIncomePage'
 import { AdminReportsPage } from '@/features/admin/pages/AdminReportsPage'
 import { AdminRoiPage } from '@/features/admin/pages/AdminRoiPage'
+import { AdminRoiOffDaysPage } from '@/features/admin/pages/AdminRoiOffDaysPage'
 import { AdminSeoPage } from '@/features/admin/pages/AdminSeoPage'
 import { AdminSiteSettings } from '@/features/admin/pages/AdminSiteSettings'
 import { AdminSponsorPage } from '@/features/admin/pages/AdminSponsorPage'
@@ -195,6 +196,7 @@ export function AppRouter() {
         <Route path="withdrawals" element={<AdminWithdrawalsPage />} />
         <Route path="packages" element={<AdminPackagesPage />} />
         <Route path="roi" element={<AdminRoiPage />} />
+        <Route path="roi-off-days" element={<AdminRoiOffDaysPage />} />
         <Route path="sponsor" element={<AdminSponsorPage />} />
         <Route path="team-levels" element={<AdminTeamLevelsPage />} />
         <Route path="ranks" element={<AdminRanksPage />} />

@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
@@ -45,6 +46,11 @@ export function AdminRoiPage() {
           <strong className="text-zinc-300">12:00 AM IST</strong> (midnight{' '}
           <code className="text-zinc-400">Asia/Kolkata</code>) via{' '}
           <code className="text-zinc-400">processDailyRoi</code>. Changing the cron requires deploying Cloud Functions.
+          Schedule holiday off-days under{' '}
+          <Link to="/admin/roi-off-days" className="text-[#d4af37] hover:underline">
+            ROI off / holidays
+          </Link>
+          .
         </p>
       </div>
       <Card className="space-y-4 border-red-900/25 p-6">

@@ -2811,6 +2811,33 @@ function isSundayIst(now = new Date()) {
     const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'long' }).format(now);
     return wd === 'Sunday';
 }
+const ROI_CALENDAR_TZ = 'Asia/Kolkata';
+/** YYYY-MM-DD in IST for `when`. */
+function istDayKey(when = new Date()) {
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: ROI_CALENDAR_TZ,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).format(when);
+}
+function normalizeRoiOffDates(raw) {
+    if (!Array.isArray(raw))
+        return [];
+    const out = new Set();
+    for (const d of raw) {
+        const s = String(d).trim();
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s))
+            out.add(s);
+    }
+    return [...out];
+}
+/** Skip nightly ROI + team level when Sunday (IST) or date is in admin `roiOffDates`. */
+function shouldSkipDailyRoiRun(settings, when = new Date()) {
+    if (isSundayIst(when))
+        return true;
+    return normalizeRoiOffDates(settings?.roiOffDates).includes(istDayKey(when));
+}
 /** Daily ROI accrual at 00:00 India Standard Time (Asia/Kolkata, UTC+5:30). */
 exports.processDailyRoi = (0, scheduler_1.onSchedule)({
     schedule: '0 0 * * *',
@@ -2820,10 +2847,11 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
     timeoutSeconds: 540,
 }, async () => {
     const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get();
-    if (settingsSnap.exists && settingsSnap.data()?.roiEnabled === false) {
+    const settings = settingsSnap.exists ? settingsSnap.data() : {};
+    if (settings.roiEnabled === false) {
         return;
     }
-    if (isSundayIst()) {
+    if (shouldSkipDailyRoiRun(settings)) {
         return;
     }
     const now = firestore_1.Timestamp.now();

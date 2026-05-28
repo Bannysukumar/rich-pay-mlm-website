@@ -232,6 +232,8 @@ export interface SiteSettings {
   rankQualificationRestPercent?: number
   /** Global ROI cron / accruals flag (cron still needed server-side). */
   roiEnabled?: boolean
+  /** IST calendar days (YYYY-MM-DD) with no daily ROI or team-level commission from the nightly cron. */
+  roiOffDates?: string[]
   roiProcessHourUtc?: number
   qrCodeUrl?: string
   tickerSymbols?: string[]

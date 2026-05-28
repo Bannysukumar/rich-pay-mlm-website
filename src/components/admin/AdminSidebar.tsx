@@ -3,6 +3,7 @@ import {
   IconArrowDownCircle,
   IconAward,
   IconBell,
+  IconCalendarOff,
   IconCash,
   IconChartLine,
   IconClipboardList,
@@ -59,6 +60,7 @@ const groups: { title: string; items: NavItem[] }[] = [
     title: 'Compensation',
     items: [
       { to: '/admin/roi', label: 'ROI', icon: IconPercentage },
+      { to: '/admin/roi-off-days', label: 'ROI off / holidays', icon: IconCalendarOff },
       { to: '/admin/sponsor', label: 'Sponsor bonus', icon: IconGift },
       { to: '/admin/referral-campaigns', label: 'Referral rewards', icon: IconAward },
       { to: '/admin/referral-share', label: 'WhatsApp invite', icon: IconShare },

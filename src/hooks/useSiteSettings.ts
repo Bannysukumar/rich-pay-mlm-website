@@ -37,6 +37,7 @@ const defaults: SiteSettings = {
   rankQualificationPowerPercent: 50,
   rankQualificationRestPercent: 50,
   roiEnabled: true,
+  roiOffDates: [],
   roiProcessHourUtc: 0,
   allowPeerActivationTransfer: true,
   /** When false, activation transfers are limited to direct referrals (server-enforced). */
@@ -149,6 +150,9 @@ export function useSiteSettings() {
             d.rankQualificationRestPercent ?? defaults.rankQualificationRestPercent ?? 50,
           ),
           roiEnabled: d.roiEnabled !== undefined ? Boolean(d.roiEnabled) : defaults.roiEnabled,
+          roiOffDates: Array.isArray(d.roiOffDates)
+            ? d.roiOffDates.map((x) => String(x).trim()).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x))
+            : defaults.roiOffDates ?? [],
           roiProcessHourUtc: Number(d.roiProcessHourUtc ?? defaults.roiProcessHourUtc ?? 0),
           allowPeerActivationTransfer:
             d.allowPeerActivationTransfer !== undefined

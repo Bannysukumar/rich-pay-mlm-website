@@ -3239,6 +3239,34 @@ function isSundayIst(now: Date = new Date()): boolean {
   return wd === 'Sunday'
 }
 
+const ROI_CALENDAR_TZ = 'Asia/Kolkata'
+
+/** YYYY-MM-DD in IST for `when`. */
+function istDayKey(when = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: ROI_CALENDAR_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(when)
+}
+
+function normalizeRoiOffDates(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out = new Set<string>()
+  for (const d of raw) {
+    const s = String(d).trim()
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) out.add(s)
+  }
+  return [...out]
+}
+
+/** Skip nightly ROI + team level when Sunday (IST) or date is in admin `roiOffDates`. */
+function shouldSkipDailyRoiRun(settings: Record<string, unknown> | undefined, when = new Date()): boolean {
+  if (isSundayIst(when)) return true
+  return normalizeRoiOffDates(settings?.roiOffDates).includes(istDayKey(when))
+}
+
 /** Daily ROI accrual at 00:00 India Standard Time (Asia/Kolkata, UTC+5:30). */
 export const processDailyRoi = onSchedule(
   {
@@ -3250,10 +3278,11 @@ export const processDailyRoi = onSchedule(
   },
   async () => {
   const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get()
-  if (settingsSnap.exists && settingsSnap.data()?.roiEnabled === false) {
+  const settings = settingsSnap.exists ? (settingsSnap.data() as Record<string, unknown>) : {}
+  if (settings.roiEnabled === false) {
     return
   }
-  if (isSundayIst()) {
+  if (shouldSkipDailyRoiRun(settings)) {
     return
   }
   const now = Timestamp.now()
