@@ -40,3 +40,21 @@ export async function requestPasswordResetCallable(payload: {
   const res = await fn({ ...payload, firebaseWebApiKey })
   return res.data as PasswordResetResult
 }
+
+/** Sign-in required — call after `updatePassword` or `confirmPasswordReset` to revoke other sessions. */
+export async function finalizeLoginPasswordChangeCallable(): Promise<{ authSessionVersion: number }> {
+  const fn = getHttpsCallable('finalizeLoginPasswordChange')
+  const res = await fn({})
+  return res.data as { authSessionVersion: number }
+}
+
+/** No auth — completes forgot-password reset and signs out other sessions. */
+export async function completePasswordResetCallable(payload: {
+  oobCode: string
+  newPassword: string
+}): Promise<{ ok: boolean; authSessionVersion: number }> {
+  const firebaseWebApiKey = String(import.meta.env.VITE_FIREBASE_API_KEY ?? '').trim()
+  const fn = getHttpsCallable('completePasswordReset')
+  const res = await fn({ ...payload, firebaseWebApiKey })
+  return res.data as { ok: boolean; authSessionVersion: number }
+}

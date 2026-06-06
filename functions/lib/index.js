@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.dismissReferralCampaignBanner = exports.adminListReferralCampaignCompletions = exports.getReferralCampaignProgress = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.requestPasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
+exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.dismissReferralCampaignBanner = exports.adminListReferralCampaignCompletions = exports.getReferralCampaignProgress = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.adminResetMemberLoginPassword = exports.finalizeLoginPasswordChange = exports.requestPasswordReset = exports.completePasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
 const node_crypto_1 = require("node:crypto");
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -950,6 +950,17 @@ async function assertFirestoreAdmin(actorUid) {
         throw new https_1.HttpsError('permission-denied', 'Administrator only');
     }
 }
+/** Revoke refresh tokens and bump Firestore session version so other browsers log out immediately. */
+async function invalidateAllLoginSessions(uid) {
+    await admin.auth().revokeRefreshTokens(uid);
+    const uRef = db.collection(COL_USERS).doc(uid);
+    await uRef.set({
+        authSessionVersion: firestore_1.FieldValue.increment(1),
+        updatedAt: Date.now(),
+    }, { merge: true });
+    const snap = await uRef.get();
+    return Number(snap.data()?.authSessionVersion ?? 1);
+}
 function chunkArray(arr, size) {
     const out = [];
     for (let i = 0; i < arr.length; i += size) {
@@ -1325,6 +1336,60 @@ async function sendPasswordResetOob(apiKey, signInEmail, continueUrl) {
         throw new Error(String(msg));
     }
 }
+/** Identity Toolkit — apply OOB reset and return Firebase Auth uid (`localId`). */
+async function completePasswordResetOob(apiKey, oobCode, newPassword) {
+    const key = apiKey.trim();
+    if (key.length < 10) {
+        throw new Error('Invalid or missing Firebase Web API key.');
+    }
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:resetPassword?key=${encodeURIComponent(key)}`;
+    const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oobCode, newPassword }),
+    });
+    const j = (await r.json());
+    if (!r.ok) {
+        const msg = j.error?.message ?? r.statusText;
+        throw new Error(String(msg));
+    }
+    const uid = String(j.localId ?? '').trim();
+    if (!uid)
+        throw new Error('Password reset did not return a user id.');
+    return { uid, email: String(j.email ?? '') };
+}
+/**
+ * Public: complete forgot-password flow from `/reset-password` and sign out other sessions.
+ */
+exports.completePasswordReset = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
+    const data = request.data;
+    const oobCode = String(data.oobCode ?? '').trim();
+    let newPassword = String(data.newPassword ?? '');
+    const webApiKey = process.env.FIREBASE_WEB_API_KEY?.trim() || String(data.firebaseWebApiKey ?? '').trim();
+    if (!oobCode)
+        throw new https_1.HttpsError('invalid-argument', 'Reset link is invalid or expired.');
+    if (newPassword.length < 6) {
+        newPassword = newPassword.padEnd(6, '0');
+    }
+    if (newPassword.length < 6) {
+        throw new https_1.HttpsError('invalid-argument', 'Password must be at least 6 characters.');
+    }
+    let uid = '';
+    try {
+        const res = await completePasswordResetOob(webApiKey, oobCode, newPassword);
+        uid = res.uid;
+    }
+    catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes('EXPIRED_OOB_CODE') || msg.includes('INVALID_OOB_CODE')) {
+            throw new https_1.HttpsError('failed-precondition', 'This reset link is invalid or has expired.');
+        }
+        throw new https_1.HttpsError('internal', 'Could not reset password. Try again or request a new link.');
+    }
+    const authSessionVersion = await invalidateAllLoginSessions(uid);
+    void audit(uid, 'completePasswordReset', {}).catch(() => { });
+    return { ok: true, authSessionVersion };
+});
 /**
  * Public: user supplies numeric UserID + registered email. If they match Firestore / Auth mapping,
  * Firebase sends a password reset link to the **Auth sign-in email** (real email or synthetic @richpay.local).
@@ -1369,7 +1434,7 @@ exports.requestPasswordReset = (0, https_1.onCall)(callableRuntimeOpts, async (r
     catch {
         return { sent: false, message: 'Could not send a reset email for this account. Contact support.' };
     }
-    const continueUrl = process.env.PASSWORD_RESET_CONTINUE_URL?.trim();
+    const continueUrl = process.env.PASSWORD_RESET_CONTINUE_URL?.trim() || 'https://richpay.live/reset-password';
     try {
         await sendPasswordResetOob(webApiKey, signInEmail, continueUrl);
     }
@@ -1388,6 +1453,52 @@ exports.requestPasswordReset = (0, https_1.onCall)(callableRuntimeOpts, async (r
         sent: true,
         message: 'Password reset email sent. Check your inbox (and spam). Follow the link to choose a new password.',
     };
+});
+/**
+ * After the member changes their login password (dashboard or reset page), revoke other sessions.
+ * The device that just changed the password should call this and update local session version.
+ */
+exports.finalizeLoginPasswordChange = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
+    if (!request.auth?.uid)
+        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
+    const uid = request.auth.uid;
+    const authSessionVersion = await invalidateAllLoginSessions(uid);
+    void audit(uid, 'finalizeLoginPasswordChange', {}).catch(() => { });
+    return { authSessionVersion };
+});
+/** Admin-only: set a member's Firebase Auth login password and sign them out everywhere else. */
+exports.adminResetMemberLoginPassword = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
+    if (!request.auth?.uid)
+        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
+    const actorUid = request.auth.uid;
+    await assertFirestoreAdmin(actorUid);
+    const data = request.data;
+    const userId = String(data.userId ?? '').trim();
+    let newPassword = String(data.newPassword ?? '');
+    if (!userId)
+        throw new https_1.HttpsError('invalid-argument', 'userId is required');
+    if (newPassword.length < 6) {
+        newPassword = newPassword.padEnd(6, '0');
+    }
+    if (newPassword.length < 6) {
+        throw new https_1.HttpsError('invalid-argument', 'Password must be at least 6 characters');
+    }
+    const uSnap = await db.collection(COL_USERS).doc(userId).get();
+    if (!uSnap.exists)
+        throw new https_1.HttpsError('not-found', 'User not found');
+    try {
+        await admin.auth().updateUser(userId, { password: newPassword });
+    }
+    catch (e) {
+        const code = e && typeof e === 'object' && 'code' in e ? String(e.code) : '';
+        if (code.includes('invalid-password')) {
+            throw new https_1.HttpsError('invalid-argument', 'Password does not meet Firebase requirements');
+        }
+        throw new https_1.HttpsError('internal', 'Could not update login password');
+    }
+    const authSessionVersion = await invalidateAllLoginSessions(userId);
+    void audit(actorUid, 'adminResetMemberLoginPassword', { userId }).catch(() => { });
+    return { ok: true, authSessionVersion };
 });
 exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
     if (!request.auth?.uid)

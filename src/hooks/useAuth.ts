@@ -1,9 +1,15 @@
-import { onAuthStateChanged } from 'firebase/auth'
+import { onAuthStateChanged, signOut } from 'firebase/auth'
 import { doc, onSnapshot } from 'firebase/firestore'
 import { useEffect } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import type { RootState } from '@/app/store'
 import { clearSession, setSession } from '@/app/authSlice'
+import {
+  clearAllLocalAuthSessionVersions,
+  clearLocalAuthSessionVersion,
+  getLocalAuthSessionVersion,
+  setLocalAuthSessionVersion,
+} from '@/lib/auth/authSessionVersion'
 import { auth, db } from '@/lib/firebase'
 import { COLLECTIONS } from '@/lib/constants'
 import type { RankCompensationSnapshot, UserProfile } from '@/types/models'
@@ -88,6 +94,7 @@ function mapUserDoc(uid: string, data: Record<string, unknown>): UserProfile {
             ]),
           )
         : undefined,
+    authSessionVersion: Number(data.authSessionVersion ?? 0),
     createdAt: Number(data.createdAt ?? 0),
     updatedAt: Number(data.updatedAt ?? 0),
   }
@@ -99,6 +106,7 @@ export function useAuthBootstrap() {
   useEffect(() => {
     let unsubProfile: (() => void) | undefined
     let unsubAuth: (() => void) | undefined
+    let tokenRefreshTimer: ReturnType<typeof setInterval> | undefined
     let cancelled = false
 
     /** Wait for IndexedDB / local persistence restore so we don’t flash logged-out on cold load. */
@@ -107,11 +115,31 @@ export function useAuthBootstrap() {
       unsubAuth = onAuthStateChanged(auth, (user) => {
         unsubProfile?.()
         unsubProfile = undefined
+        if (tokenRefreshTimer) {
+          clearInterval(tokenRefreshTimer)
+          tokenRefreshTimer = undefined
+        }
 
         if (!user) {
+          clearAllLocalAuthSessionVersions()
           dispatch(clearSession())
           return
         }
+
+        void user.getIdToken(true).catch(() => {
+          clearLocalAuthSessionVersion(user.uid)
+          void signOut(auth)
+        })
+
+        tokenRefreshTimer = setInterval(
+          () => {
+            void user.getIdToken(true).catch(() => {
+              clearLocalAuthSessionVersion(user.uid)
+              void signOut(auth)
+            })
+          },
+          5 * 60 * 1000,
+        )
 
         const ref = doc(db, COLLECTIONS.users, user.uid)
         unsubProfile = onSnapshot(
@@ -127,10 +155,22 @@ export function useAuthBootstrap() {
               )
               return
             }
+            const data = snap.data() as Record<string, unknown>
+            const serverVersion = Number(data.authSessionVersion ?? 0)
+            const localVersion = getLocalAuthSessionVersion(user.uid)
+            if (localVersion === null) {
+              setLocalAuthSessionVersion(user.uid, serverVersion)
+            } else if (serverVersion > localVersion) {
+              clearLocalAuthSessionVersion(user.uid)
+              dispatch(clearSession())
+              void signOut(auth)
+              return
+            }
+
             dispatch(
               setSession({
                 uid: user.uid,
-                profile: mapUserDoc(user.uid, snap.data() as Record<string, unknown>),
+                profile: mapUserDoc(user.uid, data),
                 loaded: true,
               }),
             )
@@ -150,6 +190,7 @@ export function useAuthBootstrap() {
 
     return () => {
       cancelled = true
+      if (tokenRefreshTimer) clearInterval(tokenRefreshTimer)
       unsubAuth?.()
       unsubProfile?.()
     }

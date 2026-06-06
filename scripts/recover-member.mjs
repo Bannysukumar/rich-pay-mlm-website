@@ -175,6 +175,18 @@ async function main() {
   await batch.commit()
   console.log('Firestore profile unblocked and username mapping refreshed.')
 
+  if (newPassword) {
+    await auth.revokeRefreshTokens(uid)
+    await uRef.set(
+      {
+        authSessionVersion: admin.firestore.FieldValue.increment(1),
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    )
+    console.log('Other login sessions revoked for this member.')
+  }
+
   try {
     const resetLink = await auth.generatePasswordResetLink(loginEmail)
     console.log('\nPassword reset link (send to member if needed):')

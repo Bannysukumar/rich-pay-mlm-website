@@ -19,6 +19,7 @@ import { useAuthState } from '@/hooks/useAuth'
 import { safeAuthReturnPath } from '@/lib/auth/homePath'
 import { COLLECTIONS } from '@/lib/constants'
 import { auth, db } from '@/lib/firebase'
+import { setLocalAuthSessionVersion } from '@/lib/auth/authSessionVersion'
 import type { UserProfile } from '@/types/models'
 
 /**
@@ -120,8 +121,10 @@ export function LoginPage() {
       try {
         const snap = await getDoc(doc(db, COLLECTIONS.users, cred.user.uid))
         if (snap.exists()) {
-          const r = snap.data()?.role
+          const d = snap.data()
+          const r = d?.role
           if (r === 'admin' || r === 'user') role = r
+          setLocalAuthSessionVersion(cred.user.uid, Number(d?.authSessionVersion ?? 0))
         }
       } catch {
         /* profile listener will resolve role shortly */

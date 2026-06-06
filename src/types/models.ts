@@ -64,6 +64,8 @@ export interface UserProfile {
   transactionPinSet?: boolean
   /** campaignId → dismissed banner version (dashboard promo). */
   dismissedReferralCampaignBanners?: Record<string, number>
+  /** Incremented when login password changes — stale browsers sign out. */
+  authSessionVersion?: number
   createdAt: number
   updatedAt: number
 }

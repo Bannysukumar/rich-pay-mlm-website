@@ -3,8 +3,10 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import toast from 'react-hot-toast'
 import { StatusNotice } from '@/components/ui/StatusNotice'
+import { finalizeLoginPasswordChangeCallable } from '@/lib/api/authCallables'
 import { getCallableErrorMessage } from '@/lib/api/callableErrorMessage'
 import { changeTransactionPasswordCallable } from '@/lib/api/profileCallables'
+import { setLocalAuthSessionVersion } from '@/lib/auth/authSessionVersion'
 import { useAuthState } from '@/hooks/useAuth'
 import { auth } from '@/lib/firebase'
 
@@ -47,17 +49,22 @@ export function ChangePasswordPage() {
           const cred = EmailAuthProvider.credential(email, oldLogin)
           await reauthenticateWithCredential(user, cred)
           await updatePassword(user, newLogin)
+          const { authSessionVersion } = await finalizeLoginPasswordChangeCallable()
+          setLocalAuthSessionVersion(user.uid, authSessionVersion)
         })(),
         {
           loading: 'Updating login password…',
-          success: 'Login password updated successfully.',
+          success: 'Login password updated. Other signed-in devices were signed out.',
           error: (err) =>
             getCallableErrorMessage(err) ||
             'Could not update login password — check your current password and try again.',
         },
         { duration: 5500, success: { duration: 7000 }, error: { duration: 10000 } },
       )
-      setBannerLogin({ kind: 'success', text: 'Your account login password was changed. Use the new password next time you sign in.' })
+      setBannerLogin({
+        kind: 'success',
+        text: 'Your login password was changed. Any other browsers or devices using this account were signed out automatically.',
+      })
       setOldLogin('')
       setNewLogin('')
       setConfirmLogin('')

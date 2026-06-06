@@ -3,6 +3,7 @@ import { ProtectedRoute } from '@/components/routing/ProtectedRoute'
 import { LogoutPage } from '@/features/auth/LogoutPage'
 import { ForgotPasswordPage } from '@/features/auth/ForgotPasswordPage'
 import { LoginPage } from '@/features/auth/LoginPage'
+import { ResetPasswordPage } from '@/features/auth/ResetPasswordPage'
 import { RegisterPage } from '@/features/auth/RegisterPage'
 import { RegisterSuccessPage } from '@/features/auth/RegisterSuccessPage'
 import { AdminLayout } from '@/features/admin/layout/AdminLayout'
@@ -135,6 +136,7 @@ export function AppRouter() {
       <Route path="/contact" element={<PublicContact />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/register/success" element={<RegisterSuccessPage />} />
       <Route path="/logout" element={<LogoutPage />} />

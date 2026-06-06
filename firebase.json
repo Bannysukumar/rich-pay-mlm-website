@@ -31,6 +31,18 @@
         "function": { "functionName": "requestPasswordReset", "region": "us-central1" }
       },
       {
+        "source": "/api/call/completePasswordReset",
+        "function": { "functionName": "completePasswordReset", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/finalizeLoginPasswordChange",
+        "function": { "functionName": "finalizeLoginPasswordChange", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/adminResetMemberLoginPassword",
+        "function": { "functionName": "adminResetMemberLoginPassword", "region": "us-central1" }
+      },
+      {
         "source": "/api/call/updateMemberProfile",
         "function": { "functionName": "updateMemberProfile", "region": "us-central1" }
       },
