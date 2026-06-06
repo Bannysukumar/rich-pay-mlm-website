@@ -11,6 +11,7 @@ import { useForm } from 'react-hook-form'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { z } from 'zod'
+import { AuthPasswordInput } from '@/features/auth/AuthPasswordInput'
 import { PublicNavbar } from '@/features/landing/PublicNavbar'
 import '@/features/landing/landing.css'
 import { doc, getDoc } from 'firebase/firestore'
@@ -186,10 +187,8 @@ export function LoginPage() {
 
             <div className="form-group">
               <label htmlFor="login-password">Password</label>
-              <input
+              <AuthPasswordInput
                 id="login-password"
-                type="password"
-                className="form-control"
                 placeholder="Your secure password"
                 autoComplete="current-password"
                 {...register('password')}

@@ -222,14 +222,31 @@ function isWithinWithdrawalWindow(policy, date = new Date()) {
         return nowM >= s && nowM <= e;
     return nowM >= s || nowM <= e;
 }
-/** Package top-up: 50% from activation wallet, 50% from deposit (cent-safe; halves sum to `amount`). */
-function splitTopupWalletDebit(amount) {
+/** Package top-up wallet split (cent-safe; parts sum to `amount`). */
+function splitTopupWalletDebit(amount, activationPercent = 50, depositPercent = 50) {
     const cents = Math.round(amount * 100);
     if (cents <= 0)
         return { activation: 0, deposit: 0 };
-    const halfActCents = Math.floor(cents / 2);
-    const halfDepCents = cents - halfActCents;
-    return { activation: halfActCents / 100, deposit: halfDepCents / 100 };
+    let actPct = Number(activationPercent);
+    let depPct = Number(depositPercent);
+    if (!Number.isFinite(actPct) || !Number.isFinite(depPct) || Math.abs(actPct + depPct - 100) > 0.001) {
+        actPct = 50;
+        depPct = 50;
+    }
+    actPct = Math.min(100, Math.max(0, actPct));
+    const activationCents = Math.floor((cents * actPct) / 100);
+    const depositCents = cents - activationCents;
+    return { activation: activationCents / 100, deposit: depositCents / 100 };
+}
+function packageTopupSplitFromSettings(settings) {
+    const activationPercent = Number(settings.packageTopupActivationPercent ?? 50);
+    const depositPercent = Number(settings.packageTopupDepositPercent ?? 50);
+    if (!Number.isFinite(activationPercent) ||
+        !Number.isFinite(depositPercent) ||
+        Math.abs(activationPercent + depositPercent - 100) > 0.001) {
+        return { activationPercent: 50, depositPercent: 50 };
+    }
+    return { activationPercent, depositPercent };
 }
 /** Non-working daily ROI cap as × principal; explicit `0` on the package = no non-working ROI. */
 function resolveNonWorkingCapMultiplierFromPackage(pkg, siteDefault) {
@@ -1427,12 +1444,13 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
     if (amount < minAmount || amount > maxAmount) {
         throw new https_1.HttpsError('invalid-argument', 'Amount out of range');
     }
-    const splitDebit = splitTopupWalletDebit(amount);
+    const splitPercents = packageTopupSplitFromSettings(settings);
+    const splitDebit = splitTopupWalletDebit(amount, splitPercents.activationPercent, splitPercents.depositPercent);
     const callerWallets = caller.wallets;
     const depositBal = Number(callerWallets?.deposit ?? 0);
     const activationBalPre = Number(callerWallets?.activation ?? 0);
     if (activationBalPre < splitDebit.activation || depositBal < splitDebit.deposit) {
-        throw new https_1.HttpsError('failed-precondition', `Package purchase splits 50/50: need $${splitDebit.activation.toFixed(2)} in Activation Wallet and $${splitDebit.deposit.toFixed(2)} in Deposit Wallet (total $${amount.toFixed(2)})`);
+        throw new https_1.HttpsError('failed-precondition', `Package purchase splits ${splitPercents.activationPercent}/${splitPercents.depositPercent}: need $${splitDebit.activation.toFixed(2)} in Activation Wallet and $${splitDebit.deposit.toFixed(2)} in Deposit Wallet (total $${amount.toFixed(2)})`);
     }
     const teamDepth = Math.min(100, Math.max(1, Number(settings.teamLevelsCount ?? 30)));
     const sponsorPctFrozen = Number(settings.sponsorPercent ?? 5);
@@ -1513,7 +1531,7 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
         const act = Number(wallets?.activation ?? 0);
         const depW = Number(wallets?.deposit ?? 0);
         if (act < splitDebit.activation || depW < splitDebit.deposit) {
-            throw new https_1.HttpsError('failed-precondition', 'Insufficient activation or deposit wallet for 50/50 split');
+            throw new https_1.HttpsError('failed-precondition', 'Insufficient activation or deposit wallet for configured package split');
         }
         tx.update(uRef, {
             'wallets.activation': act - splitDebit.activation,

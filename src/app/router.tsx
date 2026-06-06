@@ -13,6 +13,7 @@ import { AdminCmsPage } from '@/features/admin/pages/AdminCmsPage'
 import { AdminDepositsPage } from '@/features/admin/pages/AdminDepositsPage'
 import { AdminMaintenancePage } from '@/features/admin/pages/AdminMaintenancePage'
 import { AdminNotificationsPage } from '@/features/admin/pages/AdminNotificationsPage'
+import { AdminPackageActivationSplitPage } from '@/features/admin/pages/AdminPackageActivationSplitPage'
 import { AdminPackagesPage } from '@/features/admin/pages/AdminPackagesPage'
 import { AdminQrPage } from '@/features/admin/pages/AdminQrPage'
 import { AdminRegistrationsTodayPage } from '@/features/admin/pages/AdminRegistrationsTodayPage'
@@ -195,6 +196,7 @@ export function AppRouter() {
         <Route path="deposits" element={<AdminDepositsPage />} />
         <Route path="withdrawals" element={<AdminWithdrawalsPage />} />
         <Route path="packages" element={<AdminPackagesPage />} />
+        <Route path="package-activation-split" element={<AdminPackageActivationSplitPage />} />
         <Route path="roi" element={<AdminRoiPage />} />
         <Route path="roi-off-days" element={<AdminRoiOffDaysPage />} />
         <Route path="sponsor" element={<AdminSponsorPage />} />

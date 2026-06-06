@@ -6,6 +6,7 @@ import { useForm } from 'react-hook-form'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { z } from 'zod'
+import { AuthPasswordInput } from '@/features/auth/AuthPasswordInput'
 import { PublicNavbar } from '@/features/landing/PublicNavbar'
 import '@/features/landing/landing.css'
 import { useAuthState } from '@/hooks/useAuth'
@@ -249,10 +250,8 @@ export function RegisterPage() {
             <div className="auth-register-grid">
               <div className="form-group auth-register-field">
                 <label htmlFor="reg-password">Password</label>
-                <input
+                <AuthPasswordInput
                   id="reg-password"
-                  type="password"
-                  className="form-control"
                   placeholder="••••••••"
                   autoComplete="new-password"
                   {...register('password')}
@@ -261,10 +260,8 @@ export function RegisterPage() {
               </div>
               <div className="form-group auth-register-field">
                 <label htmlFor="reg-cpassword">Confirm Password</label>
-                <input
+                <AuthPasswordInput
                   id="reg-cpassword"
-                  type="password"
-                  className="form-control"
                   placeholder="••••••••"
                   autoComplete="new-password"
                   {...register('cpassword')}

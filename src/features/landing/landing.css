@@ -1542,6 +1542,40 @@
   box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.1);
 }
 
+.landing-root.auth-page-shell .auth-password-wrap {
+  position: relative;
+}
+
+.landing-root.auth-page-shell .auth-password-wrap .form-control {
+  padding-right: 3rem;
+}
+
+.landing-root.auth-page-shell .auth-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: rgba(212, 175, 55, 0.85);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition: color 0.2s ease;
+}
+
+.landing-root.auth-page-shell .auth-password-toggle:hover {
+  color: #d4af37;
+}
+
+.landing-root.auth-page-shell .auth-password-toggle:focus-visible {
+  outline: 2px solid rgba(212, 175, 55, 0.45);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 .landing-root.auth-page-shell .auth-field-error {
   margin: 6px 0 0;
   font-size: 0.8rem;

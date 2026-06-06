@@ -7,7 +7,11 @@ import { activatePackageCallable, resolveUsernameCallable } from '@/lib/api/fina
 import { StatusNotice } from '@/components/ui/StatusNotice'
 import { useAuthState } from '@/hooks/useAuth'
 import { useSiteSettings } from '@/hooks/useSiteSettings'
-import { splitTopupWalletDebit } from '@/lib/finance/splitTopupWallet'
+import {
+  formatPackageTopupSplitLabel,
+  normalizePackageTopupSplitPercentages,
+  splitTopupWalletDebit,
+} from '@/lib/finance/splitTopupWallet'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 import type { PackageDef } from '@/types/models'
@@ -52,14 +56,24 @@ export function PackageTopupPage() {
     [catalog, selectedPackageId],
   )
 
+  const topupSplit = useMemo(
+    () =>
+      normalizePackageTopupSplitPercentages(
+        settings.packageTopupActivationPercent,
+        settings.packageTopupDepositPercent,
+      ),
+    [settings.packageTopupActivationPercent, settings.packageTopupDepositPercent],
+  )
+  const splitLabel = formatPackageTopupSplitLabel(topupSplit.activationPercent, topupSplit.depositPercent)
+
   const amountNum = Number(amountInput)
   const splitPreview = useMemo(() => {
     if (!selectedPkg || !Number.isFinite(amountNum) || amountNum <= 0) return null
     const min = Math.min(selectedPkg.minAmount, selectedPkg.maxAmount)
     const max = Math.max(selectedPkg.minAmount, selectedPkg.maxAmount)
     if (amountNum < min || amountNum > max) return null
-    return splitTopupWalletDebit(amountNum)
-  }, [selectedPkg, amountNum])
+    return splitTopupWalletDebit(amountNum, topupSplit.activationPercent, topupSplit.depositPercent)
+  }, [selectedPkg, amountNum, topupSplit.activationPercent, topupSplit.depositPercent])
 
   useEffect(() => {
     const q = query(collection(db, COLLECTIONS.packages), where('active', '==', true))
@@ -176,7 +190,7 @@ export function PackageTopupPage() {
               : `Success: package activated for ${beneUser} — $${amount.toFixed(2)} · ${selectedPkg.name} (${planLabel}).`,
           error: (err) =>
             getCallableErrorMessage(err) ||
-            'Activation failed — check Activation + Deposit (50/50), plan type, and transaction password.',
+            `Activation failed — check Activation + Deposit (${splitLabel}), plan type, and transaction password.`,
         },
         { duration: 5500, success: { duration: 6500 }, error: { duration: 9000 } },
       )
@@ -188,7 +202,7 @@ export function PackageTopupPage() {
     } catch (err: unknown) {
       const msg =
         getCallableErrorMessage(err) ||
-        'Activation failed — check wallets (50% Activation + 50% Deposit), plan selection, and deploy latest functions.'
+        `Activation failed — check wallets (${topupSplit.activationPercent}% Activation + ${topupSplit.depositPercent}% Deposit), plan selection, and deploy latest functions.`
       setSubmitBanner({ kind: 'error', text: msg })
     } finally {
       setBusy(false)
@@ -311,7 +325,7 @@ export function PackageTopupPage() {
                         {splitPreview ? (
                           <p className="mt-2 mb-0 small text-muted">
                             Debit: <strong>${splitPreview.activation.toFixed(2)}</strong> from Activation +{' '}
-                            <strong>${splitPreview.deposit.toFixed(2)}</strong> from Deposit (50% / 50%).
+                            <strong>${splitPreview.deposit.toFixed(2)}</strong> from Deposit ({splitLabel}).
                           </p>
                         ) : null}
                       </div>
@@ -347,8 +361,9 @@ export function PackageTopupPage() {
                     </button>
                   </form>
                   <p className="mt-3 mb-0 small text-secondary">
-                    Payment is split <strong>50%</strong> from your Activation wallet and <strong>50%</strong> from your
-                    Deposit wallet (total equals the package amount).
+                    Payment is split <strong>{topupSplit.activationPercent}%</strong> from your Activation wallet and{' '}
+                    <strong>{topupSplit.depositPercent}%</strong> from your Deposit wallet (total equals the package
+                    amount).
                   </p>
                 </div>
               </div>

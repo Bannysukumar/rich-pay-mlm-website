@@ -54,6 +54,7 @@ const groups: { title: string; items: NavItem[] }[] = [
       { to: '/admin/deposits', label: 'Deposits', icon: IconCash },
       { to: '/admin/withdrawals', label: 'Withdrawals', icon: IconArrowDownCircle },
       { to: '/admin/packages', label: 'Packages', icon: IconPackage },
+      { to: '/admin/package-activation-split', label: 'Activation split %', icon: IconPercentage },
     ],
   },
   {

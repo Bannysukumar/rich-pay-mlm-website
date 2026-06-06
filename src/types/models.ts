@@ -235,6 +235,10 @@ export interface SiteSettings {
   /** IST calendar days (YYYY-MM-DD) with no daily ROI or team-level commission from the nightly cron. */
   roiOffDates?: string[]
   roiProcessHourUtc?: number
+  /** Percent of package amount debited from activation wallet on top-up (must sum to 100 with deposit %). */
+  packageTopupActivationPercent?: number
+  /** Percent of package amount debited from deposit wallet on top-up. */
+  packageTopupDepositPercent?: number
   qrCodeUrl?: string
   tickerSymbols?: string[]
   /** Transfer / conversion guardrails surfaced in dashboards. */
