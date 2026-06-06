@@ -15,8 +15,43 @@ export function istWeekdayLong(when = new Date()): string {
   return new Intl.DateTimeFormat('en-US', { timeZone: ROI_CALENDAR_TZ, weekday: 'long' }).format(when)
 }
 
+/** Default: no ROI / team level on Sunday (IST). */
+export const DEFAULT_ROI_OFF_WEEKDAYS: number[] = [0]
+
+export const ROI_WEEKDAY_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: 'Sunday' },
+  { value: 1, label: 'Monday' },
+  { value: 2, label: 'Tuesday' },
+  { value: 3, label: 'Wednesday' },
+  { value: 4, label: 'Thursday' },
+  { value: 5, label: 'Friday' },
+  { value: 6, label: 'Saturday' },
+]
+
+export function istWeekdayIndex(when = new Date()): number {
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: ROI_CALENDAR_TZ, weekday: 'short' }).format(when)
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  return map[wd] ?? 0
+}
+
+export function normalizeRoiOffWeekdays(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [...DEFAULT_ROI_OFF_WEEKDAYS]
+  const out = [
+    ...new Set(
+      raw
+        .map((n) => Number(n))
+        .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6),
+    ),
+  ].sort((a, b) => a - b)
+  return out.length > 0 ? out : [...DEFAULT_ROI_OFF_WEEKDAYS]
+}
+
 export function isSundayIst(when = new Date()): boolean {
-  return istWeekdayLong(when) === 'Sunday'
+  return istWeekdayIndex(when) === 0
+}
+
+export function isRoiOffWeekday(offWeekdays: number[], when = new Date()): boolean {
+  return normalizeRoiOffWeekdays(offWeekdays).includes(istWeekdayIndex(when))
 }
 
 export function normalizeRoiOffDates(raw: unknown): string[] {
@@ -33,6 +68,11 @@ export function isRoiOffDate(offDates: string[], when = new Date()): boolean {
   return offDates.includes(istDayKey(when))
 }
 
-export function shouldSkipDailyRoiAndTeamLevel(offDates: string[], when = new Date()): boolean {
-  return isSundayIst(when) || isRoiOffDate(offDates, when)
+export function shouldSkipDailyRoiAndTeamLevel(
+  offDates: string[],
+  offWeekdays: number[] = DEFAULT_ROI_OFF_WEEKDAYS,
+  when = new Date(),
+): boolean {
+  if (isRoiOffWeekday(offWeekdays, when)) return true
+  return isRoiOffDate(offDates, when)
 }

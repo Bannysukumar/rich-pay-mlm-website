@@ -2824,11 +2824,6 @@ exports.adminSeedCompensationDefaults = (0, https_1.onCall)(callableRuntimeOpts,
         withdrawDefaultsApplied,
     };
 });
-/** Sunday (IST) — no daily ROI or team-level share from that run. */
-function isSundayIst(now = new Date()) {
-    const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'long' }).format(now);
-    return wd === 'Sunday';
-}
 const ROI_CALENDAR_TZ = 'Asia/Kolkata';
 /** YYYY-MM-DD in IST for `when`. */
 function istDayKey(when = new Date()) {
@@ -2850,9 +2845,28 @@ function normalizeRoiOffDates(raw) {
     }
     return [...out];
 }
-/** Skip nightly ROI + team level when Sunday (IST) or date is in admin `roiOffDates`. */
+/** Sunday (IST) — legacy helper. Prefer `istWeekdayIndex` + `roiOffWeekdays`. */
+function isSundayIst(now = new Date()) {
+    return istWeekdayIndex(now) === 0;
+}
+function istWeekdayIndex(when = new Date()) {
+    const wd = new Intl.DateTimeFormat('en-US', { timeZone: ROI_CALENDAR_TZ, weekday: 'short' }).format(when);
+    const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    return map[wd] ?? 0;
+}
+function normalizeRoiOffWeekdays(raw) {
+    if (!Array.isArray(raw))
+        return [0];
+    const out = [
+        ...new Set(raw
+            .map((n) => Number(n))
+            .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)),
+    ].sort((a, b) => a - b);
+    return out.length > 0 ? out : [0];
+}
+/** Skip nightly ROI + team level when weekday is in admin `roiOffWeekdays` or date is in `roiOffDates`. */
 function shouldSkipDailyRoiRun(settings, when = new Date()) {
-    if (isSundayIst(when))
+    if (normalizeRoiOffWeekdays(settings?.roiOffWeekdays).includes(istWeekdayIndex(when)))
         return true;
     return normalizeRoiOffDates(settings?.roiOffDates).includes(istDayKey(when));
 }

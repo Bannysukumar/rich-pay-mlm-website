@@ -234,6 +234,8 @@ export interface SiteSettings {
   roiEnabled?: boolean
   /** IST calendar days (YYYY-MM-DD) with no daily ROI or team-level commission from the nightly cron. */
   roiOffDates?: string[]
+  /** Weekdays with no daily ROI or team level (0=Sun … 6=Sat). Default [0] = Sunday off. */
+  roiOffWeekdays?: number[]
   roiProcessHourUtc?: number
   /** Percent of package amount debited from activation wallet on top-up (must sum to 100 with deposit %). */
   packageTopupActivationPercent?: number
