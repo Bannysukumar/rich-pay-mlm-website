@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.dismissReferralCampaignBanner = exports.adminListReferralCampaignCompletions = exports.getReferralCampaignProgress = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminBulkWalletTransfer = exports.adminPreviewBulkWalletTransfer = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.adminResetMemberLoginPassword = exports.finalizeLoginPasswordChange = exports.requestPasswordReset = exports.completePasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
+exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.dismissReferralCampaignBanner = exports.adminListReferralCampaignCompletions = exports.getReferralCampaignProgress = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminMemberWalletTransfer = exports.adminBulkWalletTransfer = exports.adminPreviewBulkWalletTransfer = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.adminResetMemberLoginPassword = exports.finalizeLoginPasswordChange = exports.requestPasswordReset = exports.completePasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
 const node_crypto_1 = require("node:crypto");
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -2498,6 +2498,49 @@ exports.adminBulkWalletTransfer = (0, https_1.onCall)(bulkWalletTransferRuntimeO
     const stats = await scanBulkWalletTransfer(from, true, to);
     void audit(actorUid, 'adminBulkWalletTransfer', { fromWallet: from, toWallet: to, ...stats }).catch(() => { });
     return { ok: true, fromWallet: from, toWallet: to, ...stats };
+});
+/**
+ * Admin-only: move one member's full balance from one wallet leaf to another.
+ * Does not require maintenance mode (unlike bulk transfer for all users).
+ */
+exports.adminMemberWalletTransfer = (0, https_1.onCall)(callableRuntimeOpts, async (request) => {
+    if (!request.auth?.uid)
+        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
+    const actorUid = request.auth.uid;
+    await assertFirestoreAdmin(actorUid);
+    const data = request.data;
+    const userId = String(data.userId ?? '').trim();
+    const from = parseBulkWalletKey(String(data.fromWallet ?? ''));
+    const to = parseBulkWalletKey(String(data.toWallet ?? ''));
+    if (!userId)
+        throw new https_1.HttpsError('invalid-argument', 'userId is required');
+    if (from === to) {
+        throw new https_1.HttpsError('invalid-argument', 'Source and destination wallet must be different.');
+    }
+    const uSnap = await db.collection(COL_USERS).doc(userId).get();
+    if (!uSnap.exists)
+        throw new https_1.HttpsError('not-found', 'User not found');
+    const sourceBefore = readUserWalletLeaf(uSnap, from);
+    if (sourceBefore <= 1e-9) {
+        throw new https_1.HttpsError('failed-precondition', 'Member has no balance in the source wallet.');
+    }
+    const transferred = await transferOneUserWalletBetween(userId, from, to);
+    if (transferred <= 1e-9) {
+        throw new https_1.HttpsError('failed-precondition', 'Nothing was transferred.');
+    }
+    void audit(actorUid, 'adminMemberWalletTransfer', {
+        userId,
+        fromWallet: from,
+        toWallet: to,
+        amountTransferred: transferred,
+    }).catch(() => { });
+    return {
+        ok: true,
+        userId,
+        fromWallet: from,
+        toWallet: to,
+        amountTransferred: Math.round(transferred * 100) / 100,
+    };
 });
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /**

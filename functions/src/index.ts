@@ -2877,6 +2877,54 @@ export const adminBulkWalletTransfer = onCall(bulkWalletTransferRuntimeOpts, asy
   return { ok: true, fromWallet: from, toWallet: to, ...stats }
 })
 
+/**
+ * Admin-only: move one member's full balance from one wallet leaf to another.
+ * Does not require maintenance mode (unlike bulk transfer for all users).
+ */
+export const adminMemberWalletTransfer = onCall(callableRuntimeOpts, async (request) => {
+  if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in required')
+  const actorUid = request.auth.uid
+  await assertFirestoreAdmin(actorUid)
+
+  const data = request.data as { userId?: string; fromWallet?: string; toWallet?: string }
+  const userId = String(data.userId ?? '').trim()
+  const from = parseBulkWalletKey(String(data.fromWallet ?? ''))
+  const to = parseBulkWalletKey(String(data.toWallet ?? ''))
+
+  if (!userId) throw new HttpsError('invalid-argument', 'userId is required')
+  if (from === to) {
+    throw new HttpsError('invalid-argument', 'Source and destination wallet must be different.')
+  }
+
+  const uSnap = await db.collection(COL_USERS).doc(userId).get()
+  if (!uSnap.exists) throw new HttpsError('not-found', 'User not found')
+
+  const sourceBefore = readUserWalletLeaf(uSnap, from)
+  if (sourceBefore <= 1e-9) {
+    throw new HttpsError('failed-precondition', 'Member has no balance in the source wallet.')
+  }
+
+  const transferred = await transferOneUserWalletBetween(userId, from, to)
+  if (transferred <= 1e-9) {
+    throw new HttpsError('failed-precondition', 'Nothing was transferred.')
+  }
+
+  void audit(actorUid, 'adminMemberWalletTransfer', {
+    userId,
+    fromWallet: from,
+    toWallet: to,
+    amountTransferred: transferred,
+  }).catch(() => {})
+
+  return {
+    ok: true,
+    userId,
+    fromWallet: from,
+    toWallet: to,
+    amountTransferred: Math.round(transferred * 100) / 100,
+  }
+})
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 /**

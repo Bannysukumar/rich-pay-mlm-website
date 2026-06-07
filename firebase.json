@@ -107,6 +107,10 @@
         "function": { "functionName": "adminBulkWalletTransfer", "region": "us-central1" }
       },
       {
+        "source": "/api/call/adminMemberWalletTransfer",
+        "function": { "functionName": "adminMemberWalletTransfer", "region": "us-central1" }
+      },
+      {
         "source": "/api/call/adminUpdateMemberContact",
         "function": { "functionName": "adminUpdateMemberContact", "region": "us-central1" }
       },
