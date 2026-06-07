@@ -36,6 +36,7 @@ import { AdminTeamLevelsPage } from '@/features/admin/pages/AdminTeamLevelsPage'
 import { AdminTicketsPage } from '@/features/admin/pages/AdminTicketsPage'
 import { AdminTransferSettingsPage } from '@/features/admin/pages/AdminTransferSettingsPage'
 import { AdminMemberBalanceAdjustPage } from '@/features/admin/pages/AdminMemberBalanceAdjustPage'
+import { AdminBulkWalletTransferPage } from '@/features/admin/pages/AdminBulkWalletTransferPage'
 import { AdminMemberContactPage } from '@/features/admin/pages/AdminMemberContactPage'
 import { AdminReferralCampaignsPage } from '@/features/admin/pages/AdminReferralCampaignsPage'
 import { AdminReferralSharePage } from '@/features/admin/pages/AdminReferralSharePage'
@@ -192,6 +193,7 @@ export function AppRouter() {
         <Route path="registrations-today" element={<AdminRegistrationsTodayPage />} />
         <Route path="member-investment-plans" element={<AdminMemberInvestmentPlansPage />} />
         <Route path="member-balance-adjust" element={<AdminMemberBalanceAdjustPage />} />
+        <Route path="bulk-wallet-transfer" element={<AdminBulkWalletTransferPage />} />
         <Route path="member-contact" element={<AdminMemberContactPage />} />
         <Route path="referral-campaigns" element={<AdminReferralCampaignsPage />} />
         <Route path="referral-share" element={<AdminReferralSharePage />} />

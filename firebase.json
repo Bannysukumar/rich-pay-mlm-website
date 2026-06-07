@@ -99,6 +99,14 @@
         "function": { "functionName": "adminAdjustMemberBalances", "region": "us-central1" }
       },
       {
+        "source": "/api/call/adminPreviewBulkWalletTransfer",
+        "function": { "functionName": "adminPreviewBulkWalletTransfer", "region": "us-central1" }
+      },
+      {
+        "source": "/api/call/adminBulkWalletTransfer",
+        "function": { "functionName": "adminBulkWalletTransfer", "region": "us-central1" }
+      },
+      {
         "source": "/api/call/adminUpdateMemberContact",
         "function": { "functionName": "adminUpdateMemberContact", "region": "us-central1" }
       },

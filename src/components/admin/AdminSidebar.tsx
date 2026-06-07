@@ -50,6 +50,7 @@ const groups: { title: string; items: NavItem[] }[] = [
       { to: '/admin/registrations-today', label: 'Registrations today', icon: IconUserPlus },
       { to: '/admin/member-investment-plans', label: 'Member plans (ROI)', icon: IconPlayerPause },
       { to: '/admin/member-balance-adjust', label: 'Member balances', icon: IconCoin },
+      { to: '/admin/bulk-wallet-transfer', label: 'Bulk wallet transfer', icon: IconTransfer },
       { to: '/admin/member-contact', label: 'Email & mobile', icon: IconPhone },
       { to: '/admin/deposits', label: 'Deposits', icon: IconCash },
       { to: '/admin/withdrawals', label: 'Withdrawals', icon: IconArrowDownCircle },

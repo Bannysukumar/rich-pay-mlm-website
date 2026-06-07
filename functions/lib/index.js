@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.dismissReferralCampaignBanner = exports.adminListReferralCampaignCompletions = exports.getReferralCampaignProgress = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.adminResetMemberLoginPassword = exports.finalizeLoginPasswordChange = exports.requestPasswordReset = exports.completePasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
+exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.dismissReferralCampaignBanner = exports.adminListReferralCampaignCompletions = exports.getReferralCampaignProgress = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminBulkWalletTransfer = exports.adminPreviewBulkWalletTransfer = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.adminResetMemberLoginPassword = exports.finalizeLoginPasswordChange = exports.requestPasswordReset = exports.completePasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
 const node_crypto_1 = require("node:crypto");
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -2371,6 +2371,133 @@ exports.adminAdjustMemberBalances = (0, https_1.onCall)(callableRuntimeOpts, asy
     });
     await audit(actorUid, 'adminAdjustMemberBalances', { userId, field, delta });
     return { ok: true };
+});
+const BULK_WALLET_KEYS = ['deposit', 'activation', 'cash'];
+const BULK_WALLET_TRANSFER_CONFIRM = 'TRANSFER ALL';
+function parseBulkWalletKey(raw) {
+    const v = raw.trim().toLowerCase();
+    if (BULK_WALLET_KEYS.includes(v))
+        return v;
+    throw new https_1.HttpsError('invalid-argument', 'Invalid wallet. Choose deposit, activation, or cash.');
+}
+function readUserWalletLeaf(snap, key) {
+    const d = snap.data();
+    if (!d)
+        return 0;
+    const nest = Number(d.wallets?.[key] ?? 0);
+    const shadowRaw = d[`wallets.${key}`];
+    const shadow = typeof shadowRaw === 'number' && Number.isFinite(shadowRaw) ? shadowRaw : Number(shadowRaw ?? 0) || 0;
+    return nest + shadow;
+}
+async function assertMaintenanceModeForBulkTransfer() {
+    const cfg = (await db.collection(COL_SETTINGS).doc('config').get()).data() ?? {};
+    if (cfg.maintenanceMode !== true) {
+        throw new https_1.HttpsError('failed-precondition', 'Maintenance mode must be enabled before running a bulk wallet transfer.');
+    }
+}
+async function transferOneUserWalletBetween(uid, from, to) {
+    const ref = db.collection(COL_USERS).doc(uid);
+    let transferred = 0;
+    await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists)
+            return;
+        const d = snap.data();
+        const wallets = {};
+        for (const w of BULK_WALLET_KEYS) {
+            wallets[w] = readUserWalletLeaf(snap, w);
+        }
+        const amount = wallets[from];
+        if (!Number.isFinite(amount) || amount <= 1e-9)
+            return;
+        wallets[from] = 0;
+        wallets[to] = wallets[to] + amount;
+        transferred = amount;
+        const patch = {
+            wallets,
+            updatedAt: Date.now(),
+        };
+        for (const w of BULK_WALLET_KEYS) {
+            if (d[`wallets.${w}`] !== undefined) {
+                patch[`wallets.${w}`] = firestore_1.FieldValue.delete();
+            }
+        }
+        tx.update(ref, patch);
+    });
+    return transferred;
+}
+async function scanBulkWalletTransfer(from, execute, to) {
+    const usersSnap = await db.collection(COL_USERS).get();
+    let usersWithBalance = 0;
+    let totalAmount = 0;
+    let usersProcessed = 0;
+    for (const docSnap of usersSnap.docs) {
+        if (execute) {
+            const moved = await transferOneUserWalletBetween(docSnap.id, from, to);
+            usersProcessed++;
+            if (moved > 1e-9) {
+                usersWithBalance++;
+                totalAmount += moved;
+            }
+        }
+        else {
+            const amt = readUserWalletLeaf(docSnap, from);
+            if (amt > 1e-9) {
+                usersWithBalance++;
+                totalAmount += amt;
+            }
+        }
+    }
+    return {
+        totalUsers: usersSnap.size,
+        usersWithBalance,
+        totalAmount: Math.round(totalAmount * 100) / 100,
+        usersProcessed: execute ? usersProcessed : usersSnap.size,
+    };
+}
+const bulkWalletTransferRuntimeOpts = {
+    ...callableRuntimeOpts,
+    memory: '512MiB',
+    timeoutSeconds: 540,
+};
+/** Admin-only preview: how much would move from one wallet to another for all members. */
+exports.adminPreviewBulkWalletTransfer = (0, https_1.onCall)(bulkWalletTransferRuntimeOpts, async (request) => {
+    if (!request.auth?.uid)
+        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
+    await assertFirestoreAdmin(request.auth.uid);
+    const data = request.data;
+    const from = parseBulkWalletKey(String(data.fromWallet ?? ''));
+    const to = parseBulkWalletKey(String(data.toWallet ?? ''));
+    if (from === to) {
+        throw new https_1.HttpsError('invalid-argument', 'Source and destination wallet must be different.');
+    }
+    const stats = await scanBulkWalletTransfer(from, false, to);
+    const maintenanceOn = Boolean(((await db.collection(COL_SETTINGS).doc('config').get()).data() ?? {}).maintenanceMode);
+    return { ...stats, fromWallet: from, toWallet: to, maintenanceMode: maintenanceOn };
+});
+/**
+ * Admin-only: move every member's balance from one wallet leaf to another.
+ * Requires maintenance mode and confirm phrase `TRANSFER ALL`.
+ */
+exports.adminBulkWalletTransfer = (0, https_1.onCall)(bulkWalletTransferRuntimeOpts, async (request) => {
+    if (!request.auth?.uid)
+        throw new https_1.HttpsError('unauthenticated', 'Sign in required');
+    const actorUid = request.auth.uid;
+    await assertFirestoreAdmin(actorUid);
+    await assertMaintenanceModeForBulkTransfer();
+    const data = request.data;
+    const from = parseBulkWalletKey(String(data.fromWallet ?? ''));
+    const to = parseBulkWalletKey(String(data.toWallet ?? ''));
+    const confirmPhrase = String(data.confirmPhrase ?? '').trim();
+    if (from === to) {
+        throw new https_1.HttpsError('invalid-argument', 'Source and destination wallet must be different.');
+    }
+    if (confirmPhrase !== BULK_WALLET_TRANSFER_CONFIRM) {
+        throw new https_1.HttpsError('failed-precondition', `Type ${BULK_WALLET_TRANSFER_CONFIRM} to confirm this irreversible bulk transfer.`);
+    }
+    const stats = await scanBulkWalletTransfer(from, true, to);
+    void audit(actorUid, 'adminBulkWalletTransfer', { fromWallet: from, toWallet: to, ...stats }).catch(() => { });
+    return { ok: true, fromWallet: from, toWallet: to, ...stats };
 });
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 /**

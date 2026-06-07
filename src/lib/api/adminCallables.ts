@@ -14,6 +14,22 @@ export type AdminAdjustMemberBalanceField =
   | 'teamLevelCommissionTotal'
   | 'rankCommissionTotal'
 
+export type BulkWalletKey = 'deposit' | 'activation' | 'cash'
+
+export type BulkWalletTransferPreview = {
+  totalUsers: number
+  usersWithBalance: number
+  totalAmount: number
+  fromWallet: BulkWalletKey
+  toWallet: BulkWalletKey
+  maintenanceMode: boolean
+}
+
+export type BulkWalletTransferResult = BulkWalletTransferPreview & {
+  ok: boolean
+  usersProcessed: number
+}
+
 export async function adminAdjustMemberBalancesCallable(payload: {
   userId: string
   field: AdminAdjustMemberBalanceField
@@ -72,4 +88,23 @@ export async function adminListReferralCampaignCompletionsCallable(payload: {
   const fn = getHttpsCallable('adminListReferralCampaignCompletions')
   const res = await fn(payload)
   return res.data as ReferralCampaignCompletionsResult
+}
+
+export async function adminPreviewBulkWalletTransferCallable(payload: {
+  fromWallet: BulkWalletKey
+  toWallet: BulkWalletKey
+}): Promise<BulkWalletTransferPreview> {
+  const fn = getHttpsCallable('adminPreviewBulkWalletTransfer')
+  const res = await fn(payload)
+  return res.data as BulkWalletTransferPreview
+}
+
+export async function adminBulkWalletTransferCallable(payload: {
+  fromWallet: BulkWalletKey
+  toWallet: BulkWalletKey
+  confirmPhrase: string
+}): Promise<BulkWalletTransferResult> {
+  const fn = getHttpsCallable('adminBulkWalletTransfer')
+  const res = await fn(payload)
+  return res.data as BulkWalletTransferResult
 }
