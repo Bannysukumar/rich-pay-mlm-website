@@ -2764,28 +2764,26 @@ async function transferOneUserWalletBetween(
     if (!snap.exists) return
 
     const d = snap.data()!
-    const wallets: Record<string, number> = {}
-    for (const w of BULK_WALLET_KEYS) {
-      wallets[w] = readUserWalletLeaf(snap, w)
-    }
-
-    const amount = wallets[from]
+    const amount = readUserWalletLeaf(snap, from)
     if (!Number.isFinite(amount) || amount <= 1e-9) return
 
-    wallets[from] = 0
-    wallets[to] = wallets[to] + amount
+    const toBalance = readUserWalletLeaf(snap, to)
     transferred = amount
 
-    const patch: Record<string, unknown> = {
-      wallets,
-      updatedAt: Date.now(),
-    }
-    for (const w of BULK_WALLET_KEYS) {
-      if (d[`wallets.${w}`] !== undefined) {
-        patch[`wallets.${w}`] = FieldValue.delete()
+    type Up = [string | FieldPath, unknown]
+    const pairs: Up[] = [
+      [new FieldPath('wallets', from), 0],
+      [new FieldPath('wallets', to), toBalance + amount],
+      ['updatedAt', Date.now()],
+    ]
+    for (const w of [from, to]) {
+      const ghostKey = `wallets.${w}`
+      if (d[ghostKey] !== undefined) {
+        pairs.push([new FieldPath(ghostKey), FieldValue.delete()])
       }
     }
-    tx.update(ref, patch)
+    const flat = pairs.flat() as [string | FieldPath, unknown, ...unknown[]]
+    ;(tx.update as (r: typeof ref, ...args: unknown[]) => void)(ref, ...flat)
   })
   return transferred
 }
@@ -2798,11 +2796,20 @@ async function scanBulkWalletTransfer(from: BulkWalletKey, execute: boolean, to:
 
   for (const docSnap of usersSnap.docs) {
     if (execute) {
-      const moved = await transferOneUserWalletBetween(docSnap.id, from, to)
-      usersProcessed++
-      if (moved > 1e-9) {
-        usersWithBalance++
-        totalAmount += moved
+      try {
+        const moved = await transferOneUserWalletBetween(docSnap.id, from, to)
+        usersProcessed++
+        if (moved > 1e-9) {
+          usersWithBalance++
+          totalAmount += moved
+        }
+      } catch (e) {
+        const username = String(docSnap.data()?.username ?? docSnap.id)
+        const detail = e instanceof Error ? e.message : String(e)
+        throw new HttpsError(
+          'internal',
+          `Bulk transfer stopped at member ${username}: ${detail}`,
+        )
       }
     } else {
       const amt = readUserWalletLeaf(docSnap, from)

@@ -2403,26 +2403,24 @@ async function transferOneUserWalletBetween(uid, from, to) {
         if (!snap.exists)
             return;
         const d = snap.data();
-        const wallets = {};
-        for (const w of BULK_WALLET_KEYS) {
-            wallets[w] = readUserWalletLeaf(snap, w);
-        }
-        const amount = wallets[from];
+        const amount = readUserWalletLeaf(snap, from);
         if (!Number.isFinite(amount) || amount <= 1e-9)
             return;
-        wallets[from] = 0;
-        wallets[to] = wallets[to] + amount;
+        const toBalance = readUserWalletLeaf(snap, to);
         transferred = amount;
-        const patch = {
-            wallets,
-            updatedAt: Date.now(),
-        };
-        for (const w of BULK_WALLET_KEYS) {
-            if (d[`wallets.${w}`] !== undefined) {
-                patch[`wallets.${w}`] = firestore_1.FieldValue.delete();
+        const pairs = [
+            [new firestore_1.FieldPath('wallets', from), 0],
+            [new firestore_1.FieldPath('wallets', to), toBalance + amount],
+            ['updatedAt', Date.now()],
+        ];
+        for (const w of [from, to]) {
+            const ghostKey = `wallets.${w}`;
+            if (d[ghostKey] !== undefined) {
+                pairs.push([new firestore_1.FieldPath(ghostKey), firestore_1.FieldValue.delete()]);
             }
         }
-        tx.update(ref, patch);
+        const flat = pairs.flat();
+        tx.update(ref, ...flat);
     });
     return transferred;
 }
@@ -2433,11 +2431,18 @@ async function scanBulkWalletTransfer(from, execute, to) {
     let usersProcessed = 0;
     for (const docSnap of usersSnap.docs) {
         if (execute) {
-            const moved = await transferOneUserWalletBetween(docSnap.id, from, to);
-            usersProcessed++;
-            if (moved > 1e-9) {
-                usersWithBalance++;
-                totalAmount += moved;
+            try {
+                const moved = await transferOneUserWalletBetween(docSnap.id, from, to);
+                usersProcessed++;
+                if (moved > 1e-9) {
+                    usersWithBalance++;
+                    totalAmount += moved;
+                }
+            }
+            catch (e) {
+                const username = String(docSnap.data()?.username ?? docSnap.id);
+                const detail = e instanceof Error ? e.message : String(e);
+                throw new https_1.HttpsError('internal', `Bulk transfer stopped at member ${username}: ${detail}`);
             }
         }
         else {
