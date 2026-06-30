@@ -7,6 +7,7 @@ import {
   type DocumentSnapshot,
   type QueryDocumentSnapshot,
 } from 'firebase-admin/firestore'
+import { logger } from 'firebase-functions/v2'
 import { onSchedule } from 'firebase-functions/v2/scheduler'
 import { HttpsError, onCall } from 'firebase-functions/v2/https'
 import {
@@ -611,9 +612,15 @@ async function paySponsorBonusForActivation(
     )
 }
 
-/** Whole calendar days from package start (used with daily ROI cadence). */
+/** Whole IST calendar days from package start (matches daily ROI midnight Asia/Kolkata). */
 function wholeDaysSincePackageStart(startedAt: Timestamp, now: Timestamp): number {
-  return Math.max(0, Math.floor((now.toMillis() - startedAt.toMillis()) / 86400000))
+  const startDay = istDayKey(new Date(startedAt.toMillis()))
+  const nowDay = istDayKey(new Date(now.toMillis()))
+  const [sy, sm, sd] = startDay.split('-').map(Number)
+  const [ny, nm, nd] = nowDay.split('-').map(Number)
+  const startMs = Date.UTC(sy, sm - 1, sd)
+  const nowMs = Date.UTC(ny, nm - 1, nd)
+  return Math.max(0, Math.floor((nowMs - startMs) / 86400000))
 }
 
 /** Cap % and max paying calendar days for this matrix row (null max = no day cap when plan duration unset). */
@@ -774,6 +781,9 @@ async function distributeTeamLevelIncomeFromDailyRoi(
                 },
                 { merge: true },
               )
+            const elapsedDays = wholeDaysSincePackageStart(payoutClock.startedAt, payoutClock.now)
+            const remainingDays =
+              maxPayDays != null ? Math.max(0, maxPayDays - elapsedDays) : null
             await db.collection('teamLevelBonuses').add({
               userId: upl,
               fromUserId: downlineUid,
@@ -788,6 +798,7 @@ async function distributeTeamLevelIncomeFromDailyRoi(
               teamLevelWindowDurationDays: durSnap,
               teamLevelWindowCapPercent: capPct,
               teamLevelWindowMaxPayDays: maxPayDays,
+              teamLevelWindowRemainingDays: remainingDays,
               ...(row.conditionDescription ? { conditionDescription: row.conditionDescription } : {}),
               createdAt: FieldValue.serverTimestamp(),
             })
@@ -3645,6 +3656,32 @@ function shouldSkipDailyRoiRun(settings: Record<string, unknown> | undefined, wh
   return normalizeRoiOffDates(settings?.roiOffDates).includes(istDayKey(when))
 }
 
+/** UTC millis window for one calendar day (`YYYY-MM-DD`) in IST. */
+function istDayBounds(dayKey: string): { start: Timestamp; end: Timestamp } {
+  const [y, m, d] = dayKey.split('-').map(Number)
+  const startMs = Date.UTC(y, m - 1, d, 0, 0, 0, 0) - 5.5 * 3600000
+  return {
+    start: Timestamp.fromMillis(startMs),
+    end: Timestamp.fromMillis(startMs + 86400000),
+  }
+}
+
+/** Active packages that already received daily ROI for the IST day of `when`. */
+async function activePackageIdsWithDailyRoiForIstDay(when = new Date()): Promise<Set<string>> {
+  const { start, end } = istDayBounds(istDayKey(when))
+  const snap = await db
+    .collection(COL_DAILY)
+    .where('createdAt', '>=', start)
+    .where('createdAt', '<', end)
+    .get()
+  const ids = new Set<string>()
+  for (const doc of snap.docs) {
+    const pkgId = String(doc.data().activePackageId ?? '')
+    if (pkgId) ids.add(pkgId)
+  }
+  return ids
+}
+
 /** Daily ROI accrual at 00:00 India Standard Time (Asia/Kolkata, UTC+5:30). */
 export const processDailyRoi = onSchedule(
   {
@@ -3663,10 +3700,25 @@ export const processDailyRoi = onSchedule(
   if (shouldSkipDailyRoiRun(settings)) {
     return
   }
+  const runWhen = new Date()
+  const istDay = istDayKey(runWhen)
+  const alreadyCredited = await activePackageIdsWithDailyRoiForIstDay(runWhen)
+  if (alreadyCredited.size > 0) {
+    logger.info('processDailyRoi: packages already credited today (IST)', {
+      istDay,
+      count: alreadyCredited.size,
+    })
+  }
+
   const now = Timestamp.now()
   const snap = await db.collection(COL_ACTIVE).where('status', '==', 'active').get()
+  let skippedAlreadyCredited = 0
 
   for (const docSnap of snap.docs) {
+    if (alreadyCredited.has(docSnap.id)) {
+      skippedAlreadyCredited++
+      continue
+    }
     const ap = docSnap.data()
     const endsAt = ap.endsAt as Timestamp
     const userIdEarly = String(ap.userId ?? '')
@@ -3751,6 +3803,14 @@ export const processDailyRoi = onSchedule(
       startedAt,
       now,
       durationDays,
+    })
+    alreadyCredited.add(docSnap.id)
+  }
+
+  if (skippedAlreadyCredited > 0) {
+    logger.warn('processDailyRoi: skipped duplicate IST-day credits', {
+      istDay,
+      skippedAlreadyCredited,
     })
   }
   },

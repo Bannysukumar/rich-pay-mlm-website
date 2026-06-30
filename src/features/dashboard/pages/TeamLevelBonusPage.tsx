@@ -2,6 +2,7 @@ import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestor
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useAuthState } from '@/hooks/useAuth'
+import { remainingTeamLevelWindowDays } from '@/lib/istCalendar'
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 
@@ -24,20 +25,19 @@ function firestoreTsToMs(ts: unknown): number | null {
   return null
 }
 
-/** Same whole-day rule as Cloud Functions `wholeDaysSincePackageStart`. */
-function wholeDaysSince(startedAtMs: number, nowMs: number): number {
-  return Math.max(0, Math.floor((nowMs - startedAtMs) / 86400000))
-}
-
 function remainingTeamLevelWindowDaysLabel(
   startedAtMs: number | null,
   maxPayDays: number | null | undefined,
-  nowMs: number,
+  storedRemaining: number | null | undefined,
+  asOfMs: number,
 ): string {
   if (startedAtMs == null || maxPayDays === undefined) return '—'
   if (maxPayDays === null) return 'No day cap'
-  const elapsed = wholeDaysSince(startedAtMs, nowMs)
-  return String(Math.max(0, maxPayDays - elapsed))
+  if (typeof storedRemaining === 'number' && Number.isFinite(storedRemaining)) {
+    return String(Math.max(0, Math.floor(storedRemaining)))
+  }
+  const remaining = remainingTeamLevelWindowDays(startedAtMs, maxPayDays, asOfMs)
+  return remaining == null ? '—' : String(remaining)
 }
 
 function describeEntry(d: Record<string, unknown>) {
@@ -56,20 +56,15 @@ type Row = {
   amount: number
   downlinePackageStartedAtMs: number | null
   teamLevelWindowMaxPayDays: number | null | undefined
+  teamLevelWindowRemainingDays: number | null | undefined
 }
 
 export function TeamLevelBonusPage() {
   const { firebaseUid, profile } = useAuthState()
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
-  const [nowTick, setNowTick] = useState(() => Date.now())
 
   const total = profile?.teamLevelCommissionTotal ?? 0
-
-  useEffect(() => {
-    const id = window.setInterval(() => setNowTick(Date.now()), 60_000)
-    return () => window.clearInterval(id)
-  }, [])
 
   useEffect(() => {
     if (!firebaseUid) {
@@ -92,6 +87,7 @@ export function TeamLevelBonusPage() {
             ts && typeof ts.toMillis === 'function' ? ts.toMillis() : Number(d.createdAt ?? 0)
           const startedMs = firestoreTsToMs(d.downlinePackageStartedAt)
           const maxDays = d.teamLevelWindowMaxPayDays as number | null | undefined
+          const storedRemaining = d.teamLevelWindowRemainingDays as number | null | undefined
           next.push({
             id: doc.id,
             createdAtMs,
@@ -99,6 +95,7 @@ export function TeamLevelBonusPage() {
             amount: Number(d.amount ?? 0),
             downlinePackageStartedAtMs: startedMs,
             teamLevelWindowMaxPayDays: maxDays,
+            teamLevelWindowRemainingDays: storedRemaining,
           })
         })
         setRows(next)
@@ -124,8 +121,10 @@ export function TeamLevelBonusPage() {
               </div>
               <div className="card-body">
                 <p className="text-muted small mb-2">
-                  <strong>Remaining (days)</strong> estimates whole calendar days left in the team-level payout window
-                  for that downline stake (matches daily ROI rules). Legacy rows without stored window data show &quot;—&quot;.
+                  <strong>Remaining (days)</strong> is the payout-window days left for that downline stake{' '}
+                  <em>as of that row&apos;s payout date</em> (IST calendar, same rules as daily ROI). Older rows
+                  show higher remaining; each new daily payout should step down by 1. Legacy rows without stored
+                  window data are estimated from the payout date.
                 </p>
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">
@@ -161,7 +160,8 @@ export function TeamLevelBonusPage() {
                               {remainingTeamLevelWindowDaysLabel(
                                 r.downlinePackageStartedAtMs,
                                 r.teamLevelWindowMaxPayDays,
-                                nowTick,
+                                r.teamLevelWindowRemainingDays,
+                                r.createdAtMs,
                               )}
                             </td>
                             <td>{r.amount.toFixed(4)}</td>

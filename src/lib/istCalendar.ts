@@ -76,3 +76,29 @@ export function shouldSkipDailyRoiAndTeamLevel(
   if (isRoiOffWeekday(offWeekdays, when)) return true
   return isRoiOffDate(offDates, when)
 }
+
+/** Whole IST calendar days from `startDayKey` through `endDayKey` (same day → 0). */
+export function wholeIstCalendarDaysBetween(startDayKey: string, endDayKey: string): number {
+  const [sy, sm, sd] = startDayKey.split('-').map(Number)
+  const [ey, em, ed] = endDayKey.split('-').map(Number)
+  const startMs = Date.UTC(sy, sm - 1, sd)
+  const endMs = Date.UTC(ey, em - 1, ed)
+  return Math.max(0, Math.floor((endMs - startMs) / 86400000))
+}
+
+/** IST calendar days elapsed since package start through `asOfMs` (matches ROI midnight IST). */
+export function wholeIstDaysSinceStart(startedAtMs: number, asOfMs: number): number {
+  return wholeIstCalendarDaysBetween(istDayKey(new Date(startedAtMs)), istDayKey(new Date(asOfMs)))
+}
+
+/** Remaining team-level payout window days for a downline stake as of `asOfMs`. */
+export function remainingTeamLevelWindowDays(
+  startedAtMs: number,
+  maxPayDays: number | null | undefined,
+  asOfMs: number,
+): number | null {
+  if (maxPayDays === undefined) return null
+  if (maxPayDays === null) return null
+  const elapsed = wholeIstDaysSinceStart(startedAtMs, asOfMs)
+  return Math.max(0, maxPayDays - elapsed)
+}
