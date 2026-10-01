@@ -2,113 +2,100 @@
 
 Production-oriented scaffold for a crypto investment and referral (MLM-style) platform: React (Vite) + Tailwind + Firebase (Auth, Firestore, Storage, Functions, Hosting). UI follows a premium black and gold institutional theme with a dashboard sidebar aligned to the specification you provided.
 
-## Prerequisites
+[![License](https://img.shields.io/github/license/Bannysukumar/rich-pay-mlm-website)](https://github.com/Bannysukumar/rich-pay-mlm-website/blob/main/LICENSE) [![Stars](https://img.shields.io/github/stars/Bannysukumar/rich-pay-mlm-website)](https://github.com/Bannysukumar/rich-pay-mlm-website/stargazers) [![Last commit](https://img.shields.io/github/last-commit/Bannysukumar/rich-pay-mlm-website)](https://github.com/Bannysukumar/rich-pay-mlm-website/commits/main)
 
-- Node.js 20+ (recommended; Cloud Functions target Node 20)
-- Firebase CLI (`npm i -g firebase-tools`)
-- A Firebase project with Authentication (Email/Password), Firestore, Storage, and Functions enabled
+## Overview
 
-## Quick start (local)
+Production-oriented scaffold for a crypto investment and referral (MLM-style) platform: React (Vite) + Tailwind + Firebase (Auth, Firestore, Storage, Functions, Hosting). UI follows a premium black and gold institutional theme with a dashboard sidebar aligned to the specification you provided.
+
+
+What is actually in the repository: `functions/`, `public/`, `scripts/`, `src/`. GitHub reports the primary language as TypeScript.
+
+## Features
+
+
+- Admin Audit Page
+- Admin Bulk Wallet Transfer Page
+- Admin Cms Page
+- Admin Deposits Page
+- Admin Home
+- Admin Income Ledgers Hub Page
+- Admin Maintenance Page
+- Admin Member Balance Adjust Page
+- Admin Member Contact Page
+- Admin Member Investment Plans Page
+- Admin Notifications Page
+- Admin Package Activation Split Page
+
+## Tech Stack
+
+| Technology | Where it shows up |
+|---|---|
+| React | User interface |
+| Vite | Frontend build tool |
+| Firebase | Backend services used by this repository |
+| Tailwind CSS | Styling |
+| Recharts | Charts |
+
+## Project Architecture
+
+React interface built with Vite → Firebase project files (firestore rules, hosting, or functions) checked into this repository.
+
+## Project Structure
+
+```text
+rich-pay-mlm-website/
+├── functions/
+├── public/
+├── scripts/
+├── src/
+├── .env.example
+├── .firebaserc
+├── .firebaserc.example
+├── COMPENSATION_PLAN_AUDIT.md
+├── eslint.config.js
+├── firebase.json
+├── firestore.indexes.json
+├── firestore.rules
+├── index.html
+├── package-lock.json
+├── package.json
+├── storage.rules
+```
+
+## Getting Started
 
 ```bash
-cd rich-pay-clone
-cp .env.example .env
-# Fill VITE_* keys from Firebase console → Project settings
+git clone https://github.com/Bannysukumar/rich-pay-mlm-website.git
+cd rich-pay-mlm-website
 npm install
 npm run dev
+# Copy .env.example to .env and fill in the values that file lists.
 ```
 
-Without Firebase env vars, the app shell loads but auth/data/features will not work.
+Scripts defined in package.json:
 
-## Firebase configuration
+- `npm run dev` — `vite`
+- `npm run build` — `tsc -b && vite build`
+- `npm run lint` — `eslint .`
+- `npm run deploy:hosting+functions` — `firebase deploy --only "hosting,functions"`
 
-1. Create a web app in Firebase and copy config into `.env` as `VITE_FIREBASE_*`.
-2. Enable **Email/Password** sign-in.
-3. Deploy rules and indexes:
+## Deployment
 
-```bash
-firebase login
-firebase use <your-project-id>
-firebase deploy --only firestore:rules,firestore:indexes,storage
-```
+- firebase.json is in the repository root.
 
-4. Deploy Cloud Functions (after `npm install` inside `functions/`):
+## Contributing
 
-```bash
-firebase deploy --only functions
-```
-
-5. Deploy hosting (after `npm run build`):
-
-```bash
-firebase deploy --only hosting
-```
-
-### Admin access
-
-Firestore rules expect **custom claims** for privileged client writes (e.g. `siteSettings` from the admin UI):
-
-- `request.auth.token.admin == true`
-
-Grant the claim for your admin user (replace UID) using the Admin SDK or Firebase CLI extension. Example (Node, service account JSON on `GOOGLE_APPLICATION_CREDENTIALS`):
-
-```js
-const admin = require('firebase-admin')
-admin.initializeApp()
-admin.auth().setCustomUserClaims('<ADMIN_UID>', { admin: true })
-```
-
-Then set `role: 'admin'` on the corresponding `users/{uid}` document for UI routing consistency.
-
-### Callable functions (registration & money movement)
-
-| Function              | Purpose                                      |
-|-----------------------|----------------------------------------------|
-| `registerWithProfile` | Creates Auth user, numeric username from counter starting at `4448550`, sponsor link, phone index |
-| `activatePackage`     | Deducts activation wallet, creates `activePackages`, pays direct sponsor % from settings |
-| `createWithdrawal`    | Validates min/fee, debits cash wallet, creates pending withdrawal |
-| `walletConvert`       | `deposit → activation` or `activation → cash` |
-| `onDepositApproved`   | Firestore trigger: pending → approved credits deposit wallet |
-| `processDailyRoi`     | Scheduled: daily ROI to cash wallet with 2× non-working cap on package |
-
-Extend the same file for: team-level distribution (30 levels), rank rewards, withdrawal rejection refunds, transfer fees, and strict working (3×) caps.
-
-## Firestore collections
-
-As defined in your brief: `users`, `counters`, `packages`, `activePackages`, `deposits`, `topups`, `withdrawals`, `walletTransactions`, `internalTransfers`, `dailyProfits`, `sponsorBonuses`, `teamLevelBonuses`, `rankBonuses`, `ranks`, `teamLevels`, `tickets`, `ticketReplies`, `notifications`, `cmsPages`, `siteSettings`, `seoSettings`, `auditLogs`, plus `usersByUsername` and `phoneIndex` for lookups.
-
-Seed example `siteSettings/config` and at least one `packages/{id}` with `active: true` for top-ups to appear in the member UI.
-
-## Security notes
-
-- User documents are **read-only from the client**; all financial writes should go through Cloud Functions or Admin SDK.
-- Tighten Storage rules and add App Check before production.
-- Rate limiting: add App Check + Cloud Functions quotas / reCAPTCHA as needed.
-
-## Testing checklist
-
-- [ ] `.env` populated; `npm run dev` loads landing and admin styling
-- [ ] `registerWithProfile` creates user with expected username sequence
-- [ ] Referral URL ` /register?ref=4448550` locks / prefills sponsor fields
-- [ ] Deposit request + Storage upload succeeds under `deposits/{uid}/...`
-- [ ] Admin approves deposit → deposit wallet increases (`onDepositApproved`)
-- [ ] Package top-up debits activation and creates `activePackages`
-- [ ] Scheduled ROI runs (use emulator or short test schedule in dev)
-- [ ] Withdrawal debits cash and creates pending doc
-- [ ] Custom admin claim: `/admin` routes and `siteSettings` save work
-- [ ] `npm run build` succeeds; `firebase deploy --only hosting` serves SPA routes
-- [ ] Mobile: sidebar drawer, landing sections, forms usable at 375px width
-
-## Legal
-
-This repository is a technical scaffold. Operate any live investment or referral program only with appropriate licensing, disclosures, and legal review in your jurisdiction.
-
-<!-- readme-seo: bannysukumar -->
-
-## Open source
-
-This repository is open source and maintained by [Banny Sukumar](https://github.com/Bannysukumar). Rich Pay MLM Website is published so other developers can study the code and contribute.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 ## License
 
-Released under the [MIT License](LICENSE). Copyright (c) 2026 Banny Sukumar. See [CONTRIBUTING.md](CONTRIBUTING.md) if you want to help.
+Licensed under MIT. See [LICENSE](LICENSE).
+
+## Author
+
+[Banny Sukumar](https://github.com/Bannysukumar)
+
+- GitHub: [@Bannysukumar](https://github.com/Bannysukumar)
+- Portfolio: [adepu-sukumar.vercel.app](https://adepu-sukumar.vercel.app/)
+- LinkedIn: [Adepu Sukumar](https://www.linkedin.com/in/adepu-sukumar-59b423351)
