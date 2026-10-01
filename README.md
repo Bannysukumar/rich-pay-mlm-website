@@ -102,3 +102,13 @@ Seed example `siteSettings/config` and at least one `packages/{id}` with `active
 ## Legal
 
 This repository is a technical scaffold. Operate any live investment or referral program only with appropriate licensing, disclosures, and legal review in your jurisdiction.
+
+<!-- readme-seo: bannysukumar -->
+
+## Open source
+
+This repository is open source and maintained by [Banny Sukumar](https://github.com/Bannysukumar). Rich Pay MLM Website is published so other developers can study the code and contribute.
+
+## License
+
+Released under the [MIT License](LICENSE). Copyright (c) 2026 Banny Sukumar. See [CONTRIBUTING.md](CONTRIBUTING.md) if you want to help.
