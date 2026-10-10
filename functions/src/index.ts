@@ -1894,7 +1894,14 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
     })
 
     const now = Timestamp.now()
-    const ends = Timestamp.fromMillis(now.toMillis() + durationDays * 86400000)
+    const ends = Timestamp.fromMillis(
+      endsAtMillisAfterPayingRoiDays(
+        now.toMillis(),
+        durationDays,
+        normalizeRoiOffWeekdays(settings.roiOffWeekdays),
+        normalizeRoiOffDates(settings.roiOffDates),
+      ),
+    )
     tx.set(apRef, {
       userId: beneficiaryUid,
       packageId,
@@ -3648,6 +3655,39 @@ function normalizeRoiOffWeekdays(raw: unknown): number[] {
     ),
   ].sort((a, b) => a - b)
   return out.length > 0 ? out : [0]
+}
+
+const IST_OFFSET_MS = 5.5 * 3600000
+
+/** Next 00:00 IST strictly after `ms` (activation during a day starts counting the following midnight). */
+function nextIstMidnightAfter(ms: number): number {
+  const dayStartUtc = Math.floor((ms + IST_OFFSET_MS) / 86400000) * 86400000 - IST_OFFSET_MS
+  return ms <= dayStartUtc ? dayStartUtc : dayStartUtc + 86400000
+}
+
+/**
+ * `durationDays` is a count of ROI paying days (weekdays / dates that are not in the ROI-off calendar).
+ * `endsAt` is 12h after the Nth paying midnight so that midnight's run still credits, and the next midnight closes the plan.
+ */
+function endsAtMillisAfterPayingRoiDays(
+  fromMs: number,
+  payingDays: number,
+  offWeekdays: number[],
+  offDates: string[],
+): number {
+  const target = Math.max(0, Math.floor(payingDays))
+  if (target <= 0) return fromMs
+  const offW = new Set(offWeekdays)
+  const offD = new Set(offDates)
+  let cursor = nextIstMidnightAfter(fromMs)
+  let found = 0
+  for (let guard = 0; guard < 8000 && found < target; guard++) {
+    const when = new Date(cursor)
+    if (!offW.has(istWeekdayIndex(when)) && !offD.has(istDayKey(when))) found++
+    if (found >= target) return cursor + 12 * 3600000
+    cursor += 86400000
+  }
+  return cursor
 }
 
 /** Skip nightly ROI + team level when weekday is in admin `roiOffWeekdays` or date is in `roiOffDates`. */
