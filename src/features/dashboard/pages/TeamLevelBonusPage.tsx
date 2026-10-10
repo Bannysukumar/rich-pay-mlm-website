@@ -130,7 +130,6 @@ export function TeamLevelBonusPage() {
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">
                     <thead>
                       <tr>
-                        <th>Serial </th>
                         <th>Date </th>
                         <th>Description </th>
                         <th>Remaining (days) </th>
@@ -140,20 +139,19 @@ export function TeamLevelBonusPage() {
                     <tbody>
                       {loading ? (
                         <tr>
-                          <td colSpan={5} className="text-secondary">
+                          <td colSpan={4} className="text-secondary">
                             Loading…
                           </td>
                         </tr>
                       ) : rows.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="text-secondary">
+                          <td colSpan={4} className="text-secondary">
                             No team level bonus entries yet.
                           </td>
                         </tr>
                       ) : (
-                        rows.map((r, i) => (
+                        rows.map((r) => (
                           <tr key={r.id}>
-                            <td>{i + 1}</td>
                             <td>{fmtDate(r.createdAtMs)}</td>
                             <td>{r.description}</td>
                             <td>
