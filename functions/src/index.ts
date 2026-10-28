@@ -310,14 +310,39 @@ async function userWorkingIncomeRemaining(uid: string): Promise<number> {
   const us = await db.collection(COL_USERS).doc(uid).get()
   const ceiling = await computeUserWorkingIncomeCeiling(uid)
   const credited = workingIncomeCreditedTotal(us.data() as Record<string, unknown> | undefined)
-  return Math.max(0, ceiling - credited)
+  const workingRoom = Math.max(0, ceiling - credited)
+  if (workingRoom <= 1e-9) return 0
+  return Math.min(workingRoom, await userTotalIncomeRemaining(uid))
 }
 
-/** Skip ROI for this package when snapshot says stop-all and user has no working-income room left. */
-async function shouldSkipRoiForPackageOwner(userId: string, planSnap: Record<string, unknown> | null): Promise<boolean> {
-  if (!planSnap || planSnap.stopAllIncomeWhenWorkingCapReached !== true) return false
-  const rem = await userWorkingIncomeRemaining(userId)
-  return rem <= 1e-9
+/**
+ * Combined ceiling: Σ stake × (non-working mult + working mult) over active packages, minus
+ * ROI already paid on those packages and lifetime working income. All income stops at 0.
+ */
+async function userTotalIncomeRemaining(uid: string): Promise<number> {
+  const snap = await db.collection(COL_ACTIVE).where('userId', '==', uid).where('status', '==', 'active').get()
+  let ceiling = 0
+  let roiPaid = 0
+  for (const d of snap.docs) {
+    const x = d.data()
+    const amt = Number(x.amount ?? 0)
+    const ps = x.planSnapshot as Record<string, unknown> | undefined
+    const nw = Number(
+      x.frozenNonWorkingCapMultiplier ??
+        (ps != null && ps.nonWorkingIncomeCapMultiplier != null ? Number(ps.nonWorkingIncomeCapMultiplier) : undefined) ??
+        2,
+    )
+    const w = Number(
+      x.frozenWorkingCapMultiplier ??
+        (ps != null && ps.workingIncomeCapMultiplier != null ? Number(ps.workingIncomeCapMultiplier) : undefined) ??
+        3,
+    )
+    ceiling += amt * (Math.max(0, nw) + Math.max(0, w))
+    roiPaid += Number(x.nonWorkingPaid ?? 0)
+  }
+  const us = await db.collection(COL_USERS).doc(uid).get()
+  const working = workingIncomeCreditedTotal(us.data() as Record<string, unknown> | undefined)
+  return Math.max(0, ceiling - roiPaid - working)
 }
 
 /** Block rank drip when user exhausted working cap and at least one active package has stop-all snapshot. */
@@ -3730,6 +3755,7 @@ export const processDailyRoi = onSchedule(
     region: 'us-central1',
     memory: '512MiB',
     timeoutSeconds: 540,
+    maxInstances: 1,
   },
   async () => {
   const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get()
@@ -3784,7 +3810,8 @@ export const processDailyRoi = onSchedule(
     const userData = userRow.data() as Record<string, unknown>
     const planSnap = effectivePlanSnapshotForActivePackage(ap, userData)
 
-    if (await shouldSkipRoiForPackageOwner(userId, planSnap)) {
+    const totalIncomeRoom = await userTotalIncomeRemaining(userId)
+    if (totalIncomeRoom <= 1e-9) {
       continue
     }
 
@@ -3808,7 +3835,7 @@ export const processDailyRoi = onSchedule(
     const compound = planTypeStr === 'compounding'
     const bal = compound ? Number(ap.compoundingBalance ?? amount) : amount
     const rawDaily = (bal * roiPercent) / 100
-    const daily = Math.min(rawDaily, headroom)
+    const daily = Math.min(rawDaily, headroom, totalIncomeRoom)
     if (daily <= 1e-12) {
       continue
     }
@@ -3867,6 +3894,7 @@ export const processDailyRankRewards = onSchedule(
     region: 'us-central1',
     memory: '512MiB',
     timeoutSeconds: 540,
+    maxInstances: 1,
   },
   async () => {
     const settingsSnap = await db.collection(COL_SETTINGS).doc('config').get()
@@ -3901,6 +3929,7 @@ export const processAutoWithdrawals = onSchedule(
     region: 'us-central1',
     memory: '256MiB',
     timeoutSeconds: 300,
+    maxInstances: 1,
   },
   async () => {
     const cfgRef = db.collection(COL_SETTINGS).doc('config')
