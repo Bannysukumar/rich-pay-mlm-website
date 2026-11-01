@@ -183,8 +183,10 @@ const server = http.createServer(async (req, res) => {
   serveStatic(req, res)
 })
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[richpay] listening on :${PORT}`)
+// Listen on all interfaces (IPv6 + IPv4). Binding only 0.0.0.0 breaks nginx when
+// proxy_pass uses localhost → ::1 (classic 502 while curl 127.0.0.1 still works).
+server.listen(PORT, '::', () => {
+  console.log(`[richpay] listening on :${PORT} (IPv6/IPv4)`)
   console.log(`[richpay] dist=${DIST}`)
   console.log(`[richpay] functions proxy → ${FUNCTIONS_ORIGIN}`)
 })
