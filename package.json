@@ -9,6 +9,7 @@
     "register:example": "node scripts/register-example-user.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
+    "start": "node server.mjs",
     "deploy:hosting+functions": "firebase deploy --only \"hosting,functions\""
   },
   "dependencies": {
