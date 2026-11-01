@@ -59,7 +59,15 @@ function readReqBody(req) {
 
 function send(res, status, body, headers = {}) {
   const buf = Buffer.isBuffer(body) ? body : Buffer.from(body ?? '')
-  res.writeHead(status, { 'Content-Length': buf.length, ...headers })
+  // Drop any upstream content-length (any casing). Setting it twice makes nginx 502:
+  // "upstream sent duplicate header line: content-length"
+  const out = {}
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === 'content-length') continue
+    out[key] = value
+  }
+  out['Content-Length'] = buf.length
+  res.writeHead(status, out)
   res.end(buf)
 }
 
