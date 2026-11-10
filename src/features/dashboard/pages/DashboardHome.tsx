@@ -569,10 +569,10 @@ export function DashboardHome() {
                   <p className="small mb-0" style={{ color: '#aaa' }}>
                     Active packages: <strong className="text-light">$ {fmt(incomeCapHud.activeStake)}</strong>
                     {incomeCapHud.packageCount > 1
-                      ? ` (${incomeCapHud.packageCount} packages — each pays its own daily ROI)`
+                      ? ` (${incomeCapHud.packageCount} packages — each pays its own daily profit)`
                       : null}
                     {' · '}
-                    Max total income: <strong className="text-light">$ {fmt(incomeCapHud.totalCap)}</strong> (3×)
+                    Max you can earn: <strong className="text-light">$ {fmt(incomeCapHud.totalCap)}</strong> (3×)
                   </p>
                 </div>
                 <div className="text-end">
@@ -606,7 +606,7 @@ export function DashboardHome() {
                 <div className="col-md-4">
                   <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
                     <div className="small" style={{ color: '#aaa' }}>
-                      Daily ROI (up to 2×)
+                      Daily profit (up to 2×)
                     </div>
                     <div className="fw-semibold text-light">
                       $ {fmt(incomeCapHud.roiPaid)} / $ {fmt(incomeCapHud.roiCap)}
@@ -621,7 +621,7 @@ export function DashboardHome() {
                 <div className="col-md-4">
                   <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
                     <div className="small" style={{ color: '#aaa' }}>
-                      Referral + level + rank (up to 1×)
+                      Sponsor + team + rank (up to 1×)
                     </div>
                     <div className="fw-semibold text-light">
                       $ {fmt(incomeCapHud.workingPaid)} / $ {fmt(incomeCapHud.workingCap)}
@@ -636,7 +636,7 @@ export function DashboardHome() {
                 <div className="col-md-4">
                   <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
                     <div className="small" style={{ color: '#aaa' }}>
-                      All income vs 3×
+                      Total earned vs 3×
                     </div>
                     <div className="fw-semibold text-light">
                       $ {fmt(incomeCapHud.totalPaid)} / $ {fmt(incomeCapHud.totalCap)}

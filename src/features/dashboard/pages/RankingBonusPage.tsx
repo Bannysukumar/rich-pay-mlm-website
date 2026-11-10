@@ -18,10 +18,10 @@ function describeEntry(d: Record<string, unknown>) {
   const tx = d.transactionType
   if (typeof tx === 'string' && tx.trim()) return tx.trim()
   const rn = d.rankName
-  if (typeof rn === 'string' && rn.trim()) return rn.trim()
+  if (typeof rn === 'string' && rn.trim()) return `${rn.trim()} rank bonus`
   const desc = d.description
   if (typeof desc === 'string' && desc.trim()) return desc.trim()
-  return 'Rank Income'
+  return 'Rank bonus'
 }
 
 type Row = {
@@ -83,17 +83,24 @@ export function RankingBonusPage() {
           <div className="col-12">
             <div className="card">
               <div className="card-header">
-                <h4 className="card-title">Total Rank Commission - $ {total.toFixed(2)}</h4>
+                <h4 className="card-title">Total Rank Bonus - $ {total.toFixed(2)}</h4>
               </div>
               <div className="card-body">
+                <p className="text-muted small mb-2">
+                  Rank bonus is paid when you <strong>qualify for a new rank</strong> based on your team business
+                  (power + rest). Check your dashboard rank progress to see how close you are.
+                </p>
+                <p className="text-muted small mb-3">
+                  Rank bonus also counts toward your referral/team income limit on the dashboard (up to 1×).
+                </p>
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">
                     <thead>
                       <tr>
-                        <th>Serial </th>
-                        <th>Date </th>
-                        <th>Description </th>
-                        <th>Amount </th>
+                        <th>#</th>
+                        <th>Date</th>
+                        <th>What you received</th>
+                        <th>Amount</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -106,7 +113,7 @@ export function RankingBonusPage() {
                       ) : rows.length === 0 ? (
                         <tr>
                           <td colSpan={4} className="text-secondary">
-                            No ranking bonus entries yet.
+                            No rank bonus yet. Keep building team business to reach the next rank.
                           </td>
                         </tr>
                       ) : (
@@ -115,7 +122,7 @@ export function RankingBonusPage() {
                             <td>{i + 1}</td>
                             <td>{fmtDate(r.createdAtMs)}</td>
                             <td>{r.description}</td>
-                            <td>{r.amount.toFixed(4)}</td>
+                            <td>$ {r.amount.toFixed(4)}</td>
                           </tr>
                         ))
                       )}

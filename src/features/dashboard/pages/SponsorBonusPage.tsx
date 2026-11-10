@@ -50,7 +50,7 @@ export function SponsorBonusPage() {
           next.push({
             id: doc.id,
             createdAtMs,
-            description: String(d.description ?? 'Sponsor Income'),
+            description: String(d.description ?? 'Sponsor bonus'),
             amount: Number(d.amount ?? 0),
           })
         })
@@ -73,23 +73,26 @@ export function SponsorBonusPage() {
           <div className="col-12">
             <div className="card">
               <div className="card-header">
-                <h4 className="card-title">Total Sponsor Income - $ {total.toFixed(2)}</h4>
+                <h4 className="card-title">Total Sponsor Bonus - $ {total.toFixed(2)}</h4>
               </div>
               <div className="card-body">
+                <p className="text-muted small mb-2">
+                  You get this <strong>one time</strong> when someone you referred <strong>activates a package</strong>.
+                  Registration alone does not pay this bonus.
+                </p>
                 <p className="text-muted small mb-3">
-                  Sponsor (referral) bonus is paid once when your direct member <strong>activates a package</strong>.
-                  If they only registered and have not activated, no sponsor bonus is due yet. This income also
-                  shares your <strong>1× referral/level limit</strong> on the dashboard — when that part is full,
-                  new sponsor bonus pauses even if Daily ROI continues.
+                  Sponsor, team level, and rank bonuses together share one limit on your dashboard (up to 1× your
+                  packages). When that part is full, new sponsor bonus pauses — daily profit can still continue until
+                  your total 3× limit.
                 </p>
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">
                     <thead>
                       <tr>
-                        <th>Serial </th>
-                        <th>Date </th>
-                        <th>Description </th>
-                        <th>Amount </th>
+                        <th>#</th>
+                        <th>Date</th>
+                        <th>What you received</th>
+                        <th>Amount</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -102,7 +105,7 @@ export function SponsorBonusPage() {
                       ) : rows.length === 0 ? (
                         <tr>
                           <td colSpan={4} className="text-secondary">
-                            No sponsor bonus entries yet.
+                            No sponsor bonus yet. When a direct referral activates a package, it will show here.
                           </td>
                         </tr>
                       ) : (
@@ -110,8 +113,8 @@ export function SponsorBonusPage() {
                           <tr key={r.id}>
                             <td>{i + 1}</td>
                             <td>{fmtDate(r.createdAtMs)}</td>
-                            <td>{r.description}</td>
-                            <td>{r.amount.toFixed(4)}</td>
+                            <td>{r.description === 'Sponsor Income' ? 'Sponsor bonus' : r.description}</td>
+                            <td>$ {r.amount.toFixed(4)}</td>
                           </tr>
                         ))
                       )}

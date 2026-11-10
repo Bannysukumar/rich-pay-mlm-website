@@ -27,7 +27,7 @@ function firestoreTsToMs(ts: unknown): number | null {
 
 type WindowLabel = { primary: string; secondary?: string }
 
-/** Plain-language status of the downline sharing period on that payout date. */
+/** Plain-language progress of the downline sharing period on that payout date. */
 function remainingTeamLevelWindowDaysLabel(
   startedAtMs: number | null,
   maxPayDays: number | null | undefined,
@@ -35,7 +35,7 @@ function remainingTeamLevelWindowDaysLabel(
   asOfMs: number,
 ): WindowLabel {
   if (startedAtMs == null || maxPayDays === undefined) return { primary: '—' }
-  if (maxPayDays === null) return { primary: 'Open', secondary: 'No day limit on this package' }
+  if (maxPayDays === null) return { primary: 'Open', secondary: 'No day limit for this package' }
   const rem =
     typeof storedRemaining === 'number' && Number.isFinite(storedRemaining)
       ? Math.max(0, Math.floor(storedRemaining))
@@ -46,22 +46,26 @@ function remainingTeamLevelWindowDaysLabel(
 
   const dayNumber = Math.min(max, Math.max(1, max - rem + 1))
   if (rem <= 0) {
-    return { primary: 'Sharing ended', secondary: `Finished all ${max} days` }
+    return { primary: 'Finished', secondary: `All ${max} sharing days used` }
   }
-  const daysWord = rem === 1 ? 'day' : 'days'
+  const leftWord = rem === 1 ? '1 day left' : `${rem} days left`
   return {
     primary: `Day ${dayNumber} of ${max}`,
-    secondary: `${rem} ${daysWord} still open`,
+    secondary: leftWord,
   }
 }
 
 function describeEntry(d: Record<string, unknown>) {
   const desc = d.description
-  if (typeof desc === 'string' && desc.trim()) return desc.trim()
+  if (typeof desc === 'string' && desc.trim()) {
+    const t = desc.trim()
+    if (/level\s*\d+/i.test(t)) return t.replace(/bonus/i, 'bonus').replace(/^Level/i, 'Level')
+    return t
+  }
   const level = d.level ?? d.teamLevel ?? d.lvl
   const n = typeof level === 'number' ? level : Number(level)
-  if (Number.isFinite(n) && n > 0) return `Level ${n} Bonus`
-  return 'Team Level Bonus'
+  if (Number.isFinite(n) && n > 0) return `Level ${n} bonus`
+  return 'Team level bonus'
 }
 
 type Row = {
@@ -136,22 +140,22 @@ export function TeamLevelBonusPage() {
               </div>
               <div className="card-body">
                 <p className="text-muted small mb-2">
-                  This is your daily share from team members&apos; Daily ROI. You earn it only while their package is
-                  still in its <strong>sharing period</strong>.
+                  This is your <strong>daily team share</strong> from members under you. You earn it while their
+                  package is still sharing with the team.
                 </p>
-                <p className="text-muted small mb-3">
-                  Different packages have different sharing lengths (often about half of the plan days — for example a
-                  100-day plan may share for 50 days, a 200-day plan for about 100). The status column shows which day
-                  of that period it was when you received the bonus.
-                </p>
+                <div className="alert alert-secondary border small mb-3" role="status">
+                  <strong>Progress</strong> means which sharing day it was (example: Day 2 of 50). Different packages
+                  share for different lengths — often about half of the plan days (100-day plan ≈ 50 days, 200-day
+                  plan ≈ 100 days). Seeing 50 on one row and 100 on another is normal.
+                </div>
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">
                     <thead>
                       <tr>
-                        <th>Date </th>
-                        <th>Description </th>
-                        <th>Sharing status </th>
-                        <th>Amount </th>
+                        <th>Date</th>
+                        <th>What you received</th>
+                        <th>Progress</th>
+                        <th>Amount</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -164,7 +168,7 @@ export function TeamLevelBonusPage() {
                       ) : rows.length === 0 ? (
                         <tr>
                           <td colSpan={4} className="text-secondary">
-                            No team level bonus entries yet.
+                            No team level bonus yet. When your team earns daily profit, your share can appear here.
                           </td>
                         </tr>
                       ) : (
@@ -185,7 +189,7 @@ export function TeamLevelBonusPage() {
                                   <div className="small text-secondary">{status.secondary}</div>
                                 ) : null}
                               </td>
-                              <td>{r.amount.toFixed(4)}</td>
+                              <td>$ {r.amount.toFixed(4)}</td>
                             </tr>
                           )
                         })

@@ -65,23 +65,23 @@ export function deriveIncomeCapHud(
 
   let statusTitle = 'Income still open'
   let statusDetail =
-    'Daily ROI can keep paying until the ROI part of your limit is full. Referral and level income can pay until that part of your limit is full. Everything stops at 3× your active packages.'
+    'Daily profit can continue until its 2× part is full. Sponsor, team level, and rank can continue until their 1× part is full. Everything stops at 3× your active packages.'
 
   if (activeStake <= 0) {
     statusTitle = 'No active package'
-    statusDetail = 'Activate a package to start Daily ROI and referral income.'
+    statusDetail = 'Activate a package to start daily profit and referral income.'
   } else if (allStopped) {
     statusTitle = '3× limit reached — all income stopped'
     statusDetail =
-      'You have already received the full 3× on your active packages. Daily ROI, referral, level and rank income will not pay more until you add a new package.'
+      'You have already received the full 3× on your active packages. No more income until you add a new package.'
   } else if (workingStopped && !roiStopped) {
-    statusTitle = 'Referral / level income paused'
+    statusTitle = 'Sponsor / team income paused'
     statusDetail =
-      'Your referral + level + rank income has reached its 1× share. Daily ROI can still pay until your total reaches 3×.'
+      'Your sponsor + team level + rank income has reached its 1× share. Daily profit can still continue until your total reaches 3×.'
   } else if (roiStopped && !workingStopped) {
-    statusTitle = 'Daily ROI paused'
+    statusTitle = 'Daily profit paused'
     statusDetail =
-      'Daily ROI on your active packages has reached its 2× share. Referral / level income can still pay until your total reaches 3×.'
+      'Daily profit on your active packages has reached its 2× share. Sponsor / team income can still continue until your total reaches 3×.'
   }
 
   return {

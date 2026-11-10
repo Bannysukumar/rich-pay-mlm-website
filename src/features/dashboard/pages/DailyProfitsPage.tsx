@@ -47,7 +47,7 @@ export function DailyProfitsPage() {
               ? started.toDate().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
               : ''
           next[doc.id] = startLabel
-            ? `${name} $${amount.toFixed(0)} · started ${startLabel}`
+            ? `${name} $${amount.toFixed(0)} · from ${startLabel}`
             : `${name} $${amount.toFixed(0)}`
         })
         setPkgLabels(next)
@@ -71,6 +71,7 @@ export function DailyProfitsPage() {
   }, [rows])
 
   const activePackageCount = useMemo(() => new Set(Object.keys(pkgLabels)).size, [pkgLabels])
+  const showMultiNote = sameDayMultiPackage || activePackageCount > 1
 
   return (
     <main>
@@ -83,24 +84,27 @@ export function DailyProfitsPage() {
               </div>
               <div className="card-body">
                 <p className="text-muted small mb-2">
-                  Each active package pays its own Daily ROI. If you have two packages, you will see{' '}
-                  <strong>two rows on the same date</strong> — that is normal, not a double payment.
+                  This is your <strong>daily profit</strong> from each active package. Every package pays separately.
                 </p>
-                {sameDayMultiPackage || activePackageCount > 1 ? (
+                {showMultiNote ? (
                   <div className="alert alert-secondary border small mb-3" role="status">
-                    You currently have more than one package on record. Matching dates below are separate payouts
-                    from different packages.
+                    You have more than one package. Seeing <strong>two lines on the same date</strong> is normal —
+                    one payment from each package, not a double credit.
                   </div>
-                ) : null}
+                ) : (
+                  <p className="text-muted small mb-3">
+                    If you later activate a second package, you may see two lines on the same date. That is normal.
+                  </p>
+                )}
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">
                     <thead>
                       <tr>
-                        <th>Serial </th>
-                        <th>Date </th>
-                        <th>Description </th>
-                        <th>Package </th>
-                        <th>Amount </th>
+                        <th>#</th>
+                        <th>Date</th>
+                        <th>What you received</th>
+                        <th>From package</th>
+                        <th>Amount</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -113,7 +117,7 @@ export function DailyProfitsPage() {
                       ) : rows.length === 0 ? (
                         <tr>
                           <td colSpan={5} className="text-secondary">
-                            No daily profit entries yet.
+                            No daily profits yet. Activate a package to start earning.
                           </td>
                         </tr>
                       ) : (
@@ -121,13 +125,13 @@ export function DailyProfitsPage() {
                           <tr key={r.id}>
                             <td>{i + 1}</td>
                             <td>{fmtDate(r.createdAtMs)}</td>
-                            <td>{r.description}</td>
+                            <td>Daily profit</td>
                             <td className="small">
                               {r.activePackageId
                                 ? (pkgLabels[r.activePackageId] ?? `Package ${r.activePackageId.slice(0, 6)}…`)
                                 : '—'}
                             </td>
-                            <td>{r.amount.toFixed(4)}</td>
+                            <td>$ {r.amount.toFixed(4)}</td>
                           </tr>
                         ))
                       )}
