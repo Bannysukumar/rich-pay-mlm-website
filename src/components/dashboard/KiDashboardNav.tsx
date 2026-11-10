@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Collapse, Dropdown } from 'react-bootstrap'
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   IconBriefcase,
   IconCertificate,
@@ -140,7 +140,13 @@ const singles: { to: string; label: string; icon: React.ReactNode }[] = [
   { to: '/logout', label: 'Logout', icon: <IconLogout size={20} stroke={1.5} /> },
 ]
 
+function pathMatches(pathname: string, to: string, end = false) {
+  if (end) return pathname === to
+  return pathname === to || pathname.startsWith(`${to}/`)
+}
+
 export function KiDashboardNav({ profile, onNavigate }: Props) {
+  const { pathname } = useLocation()
   const [open, setOpen] = useState<Record<string, boolean>>({
     dashboard: true,
   })
@@ -211,11 +217,12 @@ export function KiDashboardNav({ profile, onNavigate }: Props) {
         <ul className="list-unstyled px-2 mb-0">
           {groups.map((g) => {
             const isOpen = open[g.id] ?? false
+            const isActive = g.children.some((c) => pathMatches(pathname, c.to, c.to === '/dashboard'))
             return (
               <li key={g.id} className="mb-1">
                 <button
                   type="button"
-                  className="ki-nav-parent"
+                  className={`ki-nav-parent${isActive ? ' is-active' : ''}`}
                   aria-expanded={isOpen}
                   onClick={() => setOpen((s) => ({ ...s, [g.id]: !isOpen }))}
                 >

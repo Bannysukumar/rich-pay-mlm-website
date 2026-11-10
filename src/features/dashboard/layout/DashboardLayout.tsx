@@ -50,14 +50,13 @@ export function DashboardLayout() {
           onHide={() => setMobileNav(false)}
           placement="start"
           container={dashboardRootRef}
-          className="p-0"
-          style={{ maxWidth: 300 }}
+          className="ki-mobile-nav p-0"
         >
-          <Offcanvas.Header closeButton closeVariant="white" className="border-secondary bg-dark text-light">
+          <Offcanvas.Header closeButton closeVariant="white" className="ki-mobile-nav-header border-secondary">
             <Offcanvas.Title className="text-warning">Menu</Offcanvas.Title>
           </Offcanvas.Header>
-          <Offcanvas.Body className="p-0 bg-dark">
-            <div className="ki-sidebar d-flex flex-column border-0">
+          <Offcanvas.Body className="ki-mobile-nav-body p-0">
+            <div className="ki-sidebar ki-sidebar--mobile d-flex flex-column border-0">
               <KiDashboardNav profile={profile} onNavigate={() => setMobileNav(false)} />
             </div>
           </Offcanvas.Body>
