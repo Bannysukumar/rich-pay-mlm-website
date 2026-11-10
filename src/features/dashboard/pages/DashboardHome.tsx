@@ -29,6 +29,7 @@ import {
   referralWhatsappImageUrl,
   referralWhatsappShareFromSettings,
 } from '@/lib/referralShareMessage'
+import { deriveIncomeCapHud, type ActiveStakeForCap } from '@/lib/incomeCapHud'
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
@@ -47,13 +48,9 @@ type PkgIncomeRow = {
   amount: number
   nonWorkingPaid: number
   schemaV2: boolean
+  nwMult: number
   wMult: number
-}
-
-function fmtCapMult(m: number): string {
-  if (!Number.isFinite(m) || m <= 0) return '?'
-  if (Math.abs(m - Math.round(m)) < 1e-6) return String(Math.round(m))
-  return String(m)
+  packageName: string
 }
 
 /**
@@ -223,7 +220,8 @@ export function DashboardHome() {
         let sum = 0
         let maxOne = 0
         const rows: PkgIncomeRow[] = []
-        const siteW = Number(settings.workingIncomeCapMultiplier ?? 3)
+        const siteW = Number(settings.workingIncomeCapMultiplier ?? 1)
+        const siteNw = Number(settings.nonWorkingIncomeCapMultiplier ?? 2)
         snap.forEach((doc) => {
           const d = doc.data() as Record<string, unknown>
           const status = String(d.status ?? 'active').toLowerCase()
@@ -239,13 +237,21 @@ export function DashboardHome() {
             d.frozenWorkingCapMultiplier ??
               (ps != null && ps.workingIncomeCapMultiplier != null ? Number(ps.workingIncomeCapMultiplier) : siteW),
           )
+          const nwMult = Number(
+            d.frozenNonWorkingCapMultiplier ??
+              (ps != null && ps.nonWorkingIncomeCapMultiplier != null
+                ? Number(ps.nonWorkingIncomeCapMultiplier)
+                : siteNw),
+          )
           rows.push({
             status,
             liveActive,
             amount: Number(d.amount ?? 0),
             nonWorkingPaid: Number(d.nonWorkingPaid ?? 0),
             schemaV2,
-            wMult: Number.isFinite(wMult) && wMult > 0 ? wMult : siteW,
+            nwMult: Number.isFinite(nwMult) && nwMult >= 0 ? nwMult : siteNw,
+            wMult: Number.isFinite(wMult) && wMult >= 0 ? wMult : siteW,
+            packageName: String(ps?.packageName ?? d.packageName ?? 'Package'),
           })
         })
         setActivePackageTotal(sum)
@@ -308,6 +314,18 @@ export function DashboardHome() {
       deriveNewSchemaIncomeHud(pkgIncomeRows, profile?.totalWorkingIncome ?? 0),
     [pkgIncomeRows, profile?.totalWorkingIncome],
   )
+
+  const incomeCapHud = useMemo(() => {
+    const stakes: ActiveStakeForCap[] = pkgIncomeRows.map((p) => ({
+      liveActive: p.liveActive,
+      amount: p.amount,
+      nonWorkingPaid: p.nonWorkingPaid,
+      nwMult: p.nwMult,
+      wMult: p.wMult,
+      packageName: p.packageName,
+    }))
+    return deriveIncomeCapHud(stakes, profile?.totalWorkingIncome ?? 0)
+  }, [pkgIncomeRows, profile?.totalWorkingIncome])
 
   const showCampaignBanner = useMemo(() => {
     const c = campaignProgress?.campaign
@@ -533,32 +551,129 @@ export function DashboardHome() {
 
       <StatGrid items={row1} />
 
-      <div className="row g-3 mt-2">
-        <div className="col-md-6 col-sm-12">
-          <div className="ki-eshop-card">
-            <div className="ki-eshop-icon mx-auto text-white bg-primary" style={{ opacity: 0.92 }}>
-              <span className="small fw-bold">$</span>
+      <div className="row mt-3">
+        <div className="col-12">
+          <div
+            className="card border-0"
+            style={{
+              background: 'linear-gradient(145deg, rgba(30,30,30,0.95), rgba(18,18,18,0.98))',
+              border: '1px solid rgba(212,175,55,0.28)',
+            }}
+          >
+            <div className="card-body">
+              <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+                <div>
+                  <h4 className="mb-1" style={{ color: '#d4af37', fontWeight: 700 }}>
+                    Your 3× income limit
+                  </h4>
+                  <p className="small mb-0" style={{ color: '#aaa' }}>
+                    Active packages: <strong className="text-light">$ {fmt(incomeCapHud.activeStake)}</strong>
+                    {incomeCapHud.packageCount > 1
+                      ? ` (${incomeCapHud.packageCount} packages — each pays its own daily ROI)`
+                      : null}
+                    {' · '}
+                    Max total income: <strong className="text-light">$ {fmt(incomeCapHud.totalCap)}</strong> (3×)
+                  </p>
+                </div>
+                <div className="text-end">
+                  <div className="fw-bold" style={{ color: '#d4af37', fontSize: '1.25rem' }}>
+                    {incomeCapHud.progressPct}%
+                  </div>
+                  <div className="small" style={{ color: '#888' }}>
+                    of 3× used
+                  </div>
+                </div>
+              </div>
+
+              <div
+                className="progress mb-3"
+                style={{ height: 10, background: 'rgba(255,255,255,0.08)' }}
+                role="progressbar"
+                aria-valuenow={incomeCapHud.progressPct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className="progress-bar"
+                  style={{
+                    width: `${Math.min(100, incomeCapHud.progressPct)}%`,
+                    background: incomeCapHud.allStopped ? '#c45c5c' : '#d4af37',
+                  }}
+                />
+              </div>
+
+              <div className="row g-3 mb-3">
+                <div className="col-md-4">
+                  <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                    <div className="small" style={{ color: '#aaa' }}>
+                      Daily ROI (up to 2×)
+                    </div>
+                    <div className="fw-semibold text-light">
+                      $ {fmt(incomeCapHud.roiPaid)} / $ {fmt(incomeCapHud.roiCap)}
+                    </div>
+                    <div className="small mt-1" style={{ color: incomeCapHud.roiStopped ? '#e8a0a0' : '#8dcea0' }}>
+                      {incomeCapHud.roiStopped
+                        ? 'Stopped'
+                        : `About $ ${fmt(incomeCapHud.roiRemaining)} left`}
+                    </div>
+                  </div>
+                </div>
+                <div className="col-md-4">
+                  <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                    <div className="small" style={{ color: '#aaa' }}>
+                      Referral + level + rank (up to 1×)
+                    </div>
+                    <div className="fw-semibold text-light">
+                      $ {fmt(incomeCapHud.workingPaid)} / $ {fmt(incomeCapHud.workingCap)}
+                    </div>
+                    <div className="small mt-1" style={{ color: incomeCapHud.workingStopped ? '#e8a0a0' : '#8dcea0' }}>
+                      {incomeCapHud.workingStopped
+                        ? 'Paused — this part is full'
+                        : `About $ ${fmt(incomeCapHud.workingRemaining)} left`}
+                    </div>
+                  </div>
+                </div>
+                <div className="col-md-4">
+                  <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                    <div className="small" style={{ color: '#aaa' }}>
+                      All income vs 3×
+                    </div>
+                    <div className="fw-semibold text-light">
+                      $ {fmt(incomeCapHud.totalPaid)} / $ {fmt(incomeCapHud.totalCap)}
+                    </div>
+                    <div className="small mt-1" style={{ color: incomeCapHud.allStopped ? '#e8a0a0' : '#8dcea0' }}>
+                      {incomeCapHud.allStopped
+                        ? 'Limit reached'
+                        : `About $ ${fmt(incomeCapHud.totalRemaining)} left`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                className="rounded p-3"
+                style={{
+                  background: incomeCapHud.allStopped
+                    ? 'rgba(196,92,92,0.12)'
+                    : incomeCapHud.workingStopped
+                      ? 'rgba(212,175,55,0.1)'
+                      : 'rgba(255,255,255,0.03)',
+                  border: '1px solid rgba(255,255,255,0.06)',
+                }}
+              >
+                <div className="fw-semibold mb-1" style={{ color: '#f0e6c8' }}>
+                  {incomeCapHud.statusTitle}
+                </div>
+                <p className="small mb-0" style={{ color: '#bbb' }}>
+                  {incomeCapHud.statusDetail}
+                </p>
+                {newSchemaIncomeHud.showWorkingSplitNote ? (
+                  <p className="small mb-0 mt-2" style={{ color: '#888' }}>
+                    Some older packages use an older plan snapshot; totals above still follow your live active stakes.
+                  </p>
+                ) : null}
+              </div>
             </div>
-            <h3 className="text-primary">{`$ ${fmt(newSchemaIncomeHud.nwEarned)}`}</h3>
-            <p className="mg-b-35 f-w-600 txt-ellipsis-1">
-              {`Non Working (${fmtCapMult(Number(settings.nonWorkingIncomeCapMultiplier ?? 2))}×) — earned`}
-            </p>
-          </div>
-        </div>
-        <div className="col-md-6 col-sm-12">
-          <div className="ki-eshop-card">
-            <div className="ki-eshop-icon mx-auto text-white bg-danger" style={{ opacity: 0.92 }}>
-              <span className="small fw-bold">$</span>
-            </div>
-            <h3 className="text-danger">{`$ ${fmt(newSchemaIncomeHud.wValue)}`}</h3>
-            <p className="mg-b-35 f-w-600 txt-ellipsis-1">
-              {`Working (${fmtCapMult(Number(settings.workingIncomeCapMultiplier ?? 3))}×) — earned`}
-            </p>
-            {newSchemaIncomeHud.showWorkingSplitNote ? (
-              <p className="small mb-0" style={{ color: '#888' }}>
-                Share estimated from your active stakes while legacy and new plans overlap.
-              </p>
-            ) : null}
           </div>
         </div>
       </div>

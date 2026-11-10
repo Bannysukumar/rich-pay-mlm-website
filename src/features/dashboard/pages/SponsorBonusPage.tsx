@@ -76,6 +76,12 @@ export function SponsorBonusPage() {
                 <h4 className="card-title">Total Sponsor Income - $ {total.toFixed(2)}</h4>
               </div>
               <div className="card-body">
+                <p className="text-muted small mb-3">
+                  Sponsor (referral) bonus is paid once when your direct member <strong>activates a package</strong>.
+                  If they only registered and have not activated, no sponsor bonus is due yet. This income also
+                  shares your <strong>1× referral/level limit</strong> on the dashboard — when that part is full,
+                  new sponsor bonus pauses even if Daily ROI continues.
+                </p>
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">
                     <thead>

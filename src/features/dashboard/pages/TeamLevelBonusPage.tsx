@@ -33,11 +33,14 @@ function remainingTeamLevelWindowDaysLabel(
 ): string {
   if (startedAtMs == null || maxPayDays === undefined) return '—'
   if (maxPayDays === null) return 'No day cap'
-  if (typeof storedRemaining === 'number' && Number.isFinite(storedRemaining)) {
-    return String(Math.max(0, Math.floor(storedRemaining)))
-  }
-  const remaining = remainingTeamLevelWindowDays(startedAtMs, maxPayDays, asOfMs)
-  return remaining == null ? '—' : String(remaining)
+  const rem =
+    typeof storedRemaining === 'number' && Number.isFinite(storedRemaining)
+      ? Math.max(0, Math.floor(storedRemaining))
+      : remainingTeamLevelWindowDays(startedAtMs, maxPayDays, asOfMs)
+  if (rem == null) return '—'
+  const max = Math.max(0, Math.floor(Number(maxPayDays) || 0))
+  if (max > 0) return `${rem} left of ${max}`
+  return String(rem)
 }
 
 function describeEntry(d: Record<string, unknown>) {
@@ -120,11 +123,12 @@ export function TeamLevelBonusPage() {
                 <h4 className="card-title">Total Team Level Bonus - $ {total.toFixed(4)}</h4>
               </div>
               <div className="card-body">
-                <p className="text-muted small mb-2">
-                  <strong>Remaining (days)</strong> is the payout-window days left for that downline stake{' '}
-                  <em>as of that row&apos;s payout date</em> (IST calendar, same rules as daily ROI). Older rows
-                  show higher remaining; each new daily payout should step down by 1. Legacy rows without stored
-                  window data are estimated from the payout date.
+                <p className="text-muted small mb-3">
+                  Team level income is a daily share of your downline&apos;s Daily ROI — only while their package
+                  payout window is open. The window is usually <strong>50% of that package&apos;s plan days</strong>{' '}
+                  (example: a 200-day package → about <strong>100</strong> payout days, not 50).{' '}
+                  <strong>Remaining</strong> shows days left in that window <em>on that payout date</em>. Seeing 53
+                  left of 100 is normal early in the window; it is not a 50-day bug.
                 </p>
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">

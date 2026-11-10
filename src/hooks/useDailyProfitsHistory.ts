@@ -10,6 +10,7 @@ export type DailyProfitRow = {
   createdAtMs: number
   description: string
   amount: number
+  activePackageId: string
 }
 
 /**
@@ -52,6 +53,7 @@ export function useDailyProfitsHistory(toastErrorPrefix: string) {
               createdAtMs,
               description: String(d.description ?? 'Daily Income'),
               amount: Number(d.amount ?? 0),
+              activePackageId: String(d.activePackageId ?? '').trim(),
             })
           })
           next.sort((a, b) => a.createdAtMs - b.createdAtMs)
