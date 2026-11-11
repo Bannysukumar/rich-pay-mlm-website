@@ -91,7 +91,8 @@ export function RankingBonusPage() {
                   (power + rest). Check your dashboard rank progress to see how close you are.
                 </p>
                 <p className="text-muted small mb-3">
-                  Rank bonus also counts toward your referral/team income limit on the dashboard (up to 1×).
+                  Rank bonus counts toward your total 3× income limit on the dashboard, along with sponsor and team
+                  level income.
                 </p>
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">

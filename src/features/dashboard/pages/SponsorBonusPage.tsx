@@ -81,9 +81,8 @@ export function SponsorBonusPage() {
                   Registration alone does not pay this bonus.
                 </p>
                 <p className="text-muted small mb-3">
-                  Sponsor, team level, and rank bonuses together share one limit on your dashboard (up to 1× your
-                  packages). When that part is full, new sponsor bonus pauses — daily profit can still continue until
-                  your total 3× limit.
+                  Sponsor, team level, and rank bonuses count toward your total income limit. They keep paying until
+                  your total reaches <strong>3×</strong> your active packages (daily profit itself stops at 2×).
                 </p>
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">

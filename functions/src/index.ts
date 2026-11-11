@@ -288,31 +288,12 @@ function workingIncomeCreditedTotal(ud: Record<string, unknown> | undefined): nu
   )
 }
 
-/** Σ (principal × frozen working mult) across this member’s active packages. */
-async function computeUserWorkingIncomeCeiling(uid: string): Promise<number> {
-  const snap = await db.collection(COL_ACTIVE).where('userId', '==', uid).where('status', '==', 'active').get()
-  let sum = 0
-  for (const d of snap.docs) {
-    const x = d.data()
-    const amt = Number(x.amount ?? 0)
-    const ps = x.planSnapshot as Record<string, unknown> | undefined
-    const mult = Number(
-      x.frozenWorkingCapMultiplier ??
-        (ps != null && ps.workingIncomeCapMultiplier != null ? Number(ps.workingIncomeCapMultiplier) : undefined) ??
-        3,
-    )
-    sum += amt * Math.max(0, mult)
-  }
-  return sum
-}
-
+/**
+ * Room left for sponsor / team level / rank. These keep paying past any 1× working
+ * snapshot until the member’s combined 3× total income ceiling is full.
+ */
 async function userWorkingIncomeRemaining(uid: string): Promise<number> {
-  const us = await db.collection(COL_USERS).doc(uid).get()
-  const ceiling = await computeUserWorkingIncomeCeiling(uid)
-  const credited = workingIncomeCreditedTotal(us.data() as Record<string, unknown> | undefined)
-  const workingRoom = Math.max(0, ceiling - credited)
-  if (workingRoom <= 1e-9) return 0
-  return Math.min(workingRoom, await userTotalIncomeRemaining(uid))
+  return userTotalIncomeRemaining(uid)
 }
 
 /**
@@ -3826,7 +3807,7 @@ export const processDailyRoi = onSchedule(
     )
     const cap = amount * Math.max(nwMult, 0)
     const headroom = Math.max(0, cap - nonWorkingPaid)
-    /** NW bucket full — stay `active` so sponsor/team income can continue until plan ends or working cap is hit. */
+    /** NW bucket full — stay `active` so sponsor/team income can continue until total 3× is hit. */
     if (headroom <= 1e-12) {
       continue
     }

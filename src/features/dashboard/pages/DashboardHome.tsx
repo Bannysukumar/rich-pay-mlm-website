@@ -621,15 +621,15 @@ export function DashboardHome() {
                 <div className="col-md-4">
                   <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
                     <div className="small" style={{ color: '#aaa' }}>
-                      Sponsor + team + rank (up to 1×)
+                      Sponsor + team + rank (until 3× total)
                     </div>
                     <div className="fw-semibold text-light">
                       $ {fmt(incomeCapHud.workingPaid)} / $ {fmt(incomeCapHud.workingCap)}
                     </div>
                     <div className="small mt-1" style={{ color: incomeCapHud.workingStopped ? '#e8a0a0' : '#8dcea0' }}>
                       {incomeCapHud.workingStopped
-                        ? 'Paused — this part is full'
-                        : `About $ ${fmt(incomeCapHud.workingRemaining)} left`}
+                        ? 'Stopped — 3× reached'
+                        : `About $ ${fmt(incomeCapHud.workingRemaining)} left to 3×`}
                     </div>
                   </div>
                 </div>
