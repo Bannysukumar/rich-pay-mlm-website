@@ -40,7 +40,7 @@ export function DashboardLayout() {
     >
       <div className="ki-app-wrapper">
         {/* Desktop sidebar */}
-        <aside className="ki-sidebar ki-sidebar--desktop flex-column">
+        <aside className="ki-sidebar ki-sidebar--desktop">
           <KiDashboardNav profile={profile} />
         </aside>
 

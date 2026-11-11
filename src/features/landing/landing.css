@@ -314,16 +314,16 @@
   top: 0;
   left: 0;
   right: 0;
-  z-index: 50;
+  z-index: 200;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 18px 8%;
-  background: rgba(5, 5, 5, 0.85);
+  background: rgba(5, 5, 5, 0.92);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--glass-border);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .landing-root #landing-navbar .logo img {
@@ -378,25 +378,61 @@
   }
   .landing-root .mobile-menu-btn {
     display: block;
+    position: relative;
+    z-index: 2;
   }
   .landing-root .nav-links.open {
     display: flex;
     flex-direction: column;
-    position: absolute;
-    top: 100%;
+    position: fixed;
+    top: 72px;
     left: 0;
     right: 0;
-    background: rgba(8, 8, 8, 0.98);
-    padding: 1.5rem 8%;
+    bottom: 0;
+    z-index: 201;
+    background: #0a0a0a;
+    padding: 0.75rem 8% 2rem;
     gap: 0;
-    border-bottom: 1px solid var(--glass-border);
+    border-bottom: none;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
   .landing-root .nav-links.open li {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    flex-shrink: 0;
   }
   .landing-root .nav-links.open a {
     display: block;
-    padding: 14px 0;
+    padding: 16px 0;
+    position: relative;
+    z-index: 1;
+    color: #e8e8e8;
+  }
+  .landing-root .nav-links.open .btn-gold {
+    margin-top: 0.85rem;
+    text-align: center;
+  }
+  .landing-root.nav-open {
+    overflow: hidden;
+  }
+}
+
+.landing-root .landing-nav-backdrop {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .landing-root .landing-nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 199;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    background: rgba(0, 0, 0, 0.55);
+    cursor: pointer;
   }
 }
 
