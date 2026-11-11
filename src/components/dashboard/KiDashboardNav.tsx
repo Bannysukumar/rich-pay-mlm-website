@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Collapse, Dropdown } from 'react-bootstrap'
+import { Dropdown } from 'react-bootstrap'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
   IconBriefcase,
@@ -171,9 +171,9 @@ export function KiDashboardNav({ profile, onNavigate }: Props) {
     const id = window.setTimeout(() => {
       const link = activeLinkRef.current
       if (!link) return
-      // Mobile scrolls .ki-mobile-nav-body; desktop scrolls .ki-nav-scroll.
+      // Mobile drawer scrolls .ki-drawer-scroll; desktop scrolls .ki-nav-scroll.
       const scroller =
-        (link.closest('.ki-mobile-nav-body') as HTMLElement | null) ??
+        (link.closest('.ki-drawer-scroll') as HTMLElement | null) ??
         scrollRef.current
       if (!scroller) return
       const linkRect = link.getBoundingClientRect()
@@ -264,8 +264,8 @@ export function KiDashboardNav({ profile, onNavigate }: Props) {
                   {g.icon}
                   <span className="text-capitalize flex-grow-1">{g.label}</span>
                 </button>
-                <Collapse in={isOpen}>
-                  <ul className="list-unstyled mb-2 pb-1">
+                {isOpen ? (
+                  <ul className="list-unstyled mb-2 pb-1 ki-nav-sublist">
                     {g.children.map((c) => (
                       <li key={c.to}>
                         <NavLink
@@ -282,7 +282,7 @@ export function KiDashboardNav({ profile, onNavigate }: Props) {
                       </li>
                     ))}
                   </ul>
-                </Collapse>
+                ) : null}
               </li>
             )
           })}

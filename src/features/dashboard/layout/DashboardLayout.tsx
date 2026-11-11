@@ -2,9 +2,9 @@ import 'bootstrap/dist/css/bootstrap.min.css'
 import '@/styles/dashboard-ki.css'
 
 import { useEffect, useRef, useState } from 'react'
-import { Offcanvas } from 'react-bootstrap'
+import { createPortal } from 'react-dom'
 import { Navigate, Outlet } from 'react-router-dom'
-import { CaretUp } from '@phosphor-icons/react'
+import { CaretUp, X } from '@phosphor-icons/react'
 import { KiDashboardHeader } from '@/components/dashboard/KiDashboardHeader'
 import { KiDashboardNav } from '@/components/dashboard/KiDashboardNav'
 import { useAuthState } from '@/hooks/useAuth'
@@ -15,8 +15,6 @@ export function DashboardLayout() {
   const [darkMode, setDarkMode] = useState(true)
   const [goTop, setGoTop] = useState(false)
   const mainRef = useRef<HTMLDivElement>(null)
-  /** Keep mobile menu in this subtree so `#ki-dashboard-root …` CSS applies (default portal is `body`). */
-  const dashboardRootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const el = mainRef.current
@@ -27,40 +25,74 @@ export function DashboardLayout() {
     return () => el.removeEventListener('scroll', onScroll)
   }, [])
 
+  // Lock page scroll while the mobile drawer is open.
+  useEffect(() => {
+    if (!mobileNav) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [mobileNav])
+
+  // Close on route-driven escape / back-friendly Escape key.
+  useEffect(() => {
+    if (!mobileNav) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileNav(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [mobileNav])
+
   if (profileLoaded && profile?.role === 'admin') {
     return <Navigate to="/admin" replace />
   }
 
+  const drawer =
+    mobileNav &&
+    createPortal(
+      <div className={`ki-drawer-root ${darkMode ? 'is-dark' : 'is-light'}`} role="presentation">
+        <button
+          type="button"
+          className="ki-drawer-backdrop"
+          aria-label="Close menu"
+          onClick={() => setMobileNav(false)}
+        />
+        <aside className="ki-drawer-panel" role="dialog" aria-modal="true" aria-label="Dashboard menu">
+          <div className="ki-drawer-header">
+            <span className="ki-drawer-title">Menu</span>
+            <button
+              type="button"
+              className="ki-drawer-close"
+              aria-label="Close"
+              onClick={() => setMobileNav(false)}
+            >
+              <X size={22} weight="bold" />
+            </button>
+          </div>
+          <div className="ki-drawer-scroll">
+            <div className="ki-sidebar ki-sidebar--mobile border-0">
+              <KiDashboardNav profile={profile} onNavigate={() => setMobileNav(false)} />
+            </div>
+          </div>
+        </aside>
+      </div>,
+      document.body,
+    )
+
   return (
     <div
       id="ki-dashboard-root"
-      ref={dashboardRootRef}
       className={`ltr ${darkMode ? 'dark' : ''}`}
       data-bs-theme={darkMode ? 'dark' : 'light'}
     >
       <div className="ki-app-wrapper">
-        {/* Desktop sidebar */}
         <aside className="ki-sidebar ki-sidebar--desktop">
           <KiDashboardNav profile={profile} />
         </aside>
 
-        {/* Mobile menu */}
-        <Offcanvas
-          show={mobileNav}
-          onHide={() => setMobileNav(false)}
-          placement="start"
-          container={dashboardRootRef}
-          className="ki-mobile-nav p-0"
-        >
-          <Offcanvas.Header closeButton closeVariant="white" className="ki-mobile-nav-header border-secondary">
-            <Offcanvas.Title className="text-warning">Menu</Offcanvas.Title>
-          </Offcanvas.Header>
-          <Offcanvas.Body className="ki-mobile-nav-body p-0">
-            <div className="ki-sidebar ki-sidebar--mobile d-flex flex-column border-0">
-              <KiDashboardNav profile={profile} onNavigate={() => setMobileNav(false)} />
-            </div>
-          </Offcanvas.Body>
-        </Offcanvas>
+        {drawer}
 
         <div className="ki-app-main d-flex flex-column min-vh-100">
           <KiDashboardHeader
