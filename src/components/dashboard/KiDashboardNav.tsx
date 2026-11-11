@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Collapse, Dropdown } from 'react-bootstrap'
 import { Link, NavLink, useLocation } from 'react-router-dom'
 import {
@@ -145,11 +145,43 @@ function pathMatches(pathname: string, to: string, end = false) {
   return pathname === to || pathname.startsWith(`${to}/`)
 }
 
+function groupsOpenForPath(pathname: string): Record<string, boolean> {
+  const next: Record<string, boolean> = { dashboard: true }
+  for (const g of groups) {
+    const active = g.children.some((c) => pathMatches(pathname, c.to, c.to === '/dashboard'))
+    if (active) next[g.id] = true
+  }
+  return next
+}
+
 export function KiDashboardNav({ profile, onNavigate }: Props) {
   const { pathname } = useLocation()
-  const [open, setOpen] = useState<Record<string, boolean>>({
-    dashboard: true,
-  })
+  const [open, setOpen] = useState<Record<string, boolean>>(() => groupsOpenForPath(pathname))
+  const activeLinkRef = useRef<HTMLAnchorElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+
+  // Keep the section for the current page open so items do not look “hidden”.
+  useEffect(() => {
+    setOpen((prev) => {
+      const required = groupsOpenForPath(pathname)
+      let changed = false
+      const merged = { ...prev }
+      for (const [id, v] of Object.entries(required)) {
+        if (v && !merged[id]) {
+          merged[id] = true
+          changed = true
+        }
+      }
+      return changed ? merged : prev
+    })
+  }, [pathname])
+
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      activeLinkRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }, 80)
+    return () => window.clearTimeout(id)
+  }, [pathname, open])
 
   const displayName = profile?.fullName?.trim() || 'Member'
   const usernameLine = profile?.username || '—'
@@ -212,7 +244,7 @@ export function KiDashboardNav({ profile, onNavigate }: Props) {
         </Dropdown>
       </div>
 
-      <div className="ki-nav-scroll">
+      <div className="ki-nav-scroll" ref={scrollRef}>
         <span className="ki-menu-title">Home</span>
         <ul className="list-unstyled px-2 mb-0">
           {groups.map((g) => {
@@ -237,6 +269,9 @@ export function KiDashboardNav({ profile, onNavigate }: Props) {
                           to={c.to}
                           end={c.to === '/dashboard'}
                           onClick={onNavigate}
+                          ref={(node) => {
+                            if (node?.classList.contains('active')) activeLinkRef.current = node
+                          }}
                           className={({ isActive }) => `ki-nav-sublink d-block ${isActive ? 'active' : ''}`}
                         >
                           {c.label}
@@ -254,6 +289,9 @@ export function KiDashboardNav({ profile, onNavigate }: Props) {
               <NavLink
                 to={s.to}
                 onClick={onNavigate}
+                ref={(node) => {
+                  if (node?.classList.contains('active')) activeLinkRef.current = node
+                }}
                 className={({ isActive }) => `ki-nav-single ${isActive ? 'active' : ''}`}
               >
                 {s.icon}

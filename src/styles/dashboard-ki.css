@@ -79,6 +79,10 @@
   --bs-offcanvas-width: min(278px, 86vw);
   width: var(--bs-offcanvas-width);
   max-width: var(--bs-offcanvas-width);
+  height: 100%;
+  max-height: 100dvh;
+  display: flex;
+  flex-direction: column;
   background: var(--ki-panel);
   border-right: 1px solid var(--ki-border);
 }
@@ -93,7 +97,7 @@
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
-  height: auto;
+  height: 0; /* force flex child to take remaining height so .ki-nav-scroll can overflow */
   min-height: 0;
   overflow: hidden;
   padding: 0;
@@ -107,6 +111,9 @@
   min-height: 0;
   border-right: none;
   flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 /* Sidebar — brand row (seal + wordmark, Ki reference) */
