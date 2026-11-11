@@ -146,11 +146,13 @@ function pathMatches(pathname: string, to: string, end = false) {
 }
 
 function groupsOpenForPath(pathname: string): Record<string, boolean> {
-  const next: Record<string, boolean> = { dashboard: true }
+  const next: Record<string, boolean> = {}
   for (const g of groups) {
     const active = g.children.some((c) => pathMatches(pathname, c.to, c.to === '/dashboard'))
-    if (active) next[g.id] = true
+    next[g.id] = active
   }
+  // Home fallback when nothing matches (e.g. unknown path).
+  if (!Object.values(next).some(Boolean)) next.dashboard = true
   return next
 }
 
@@ -160,26 +162,27 @@ export function KiDashboardNav({ profile, onNavigate }: Props) {
   const activeLinkRef = useRef<HTMLAnchorElement | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
-  // Keep the section for the current page open so items do not look “hidden”.
+  // Open only the section for the current page (keeps mobile menu short enough to use).
   useEffect(() => {
-    setOpen((prev) => {
-      const required = groupsOpenForPath(pathname)
-      let changed = false
-      const merged = { ...prev }
-      for (const [id, v] of Object.entries(required)) {
-        if (v && !merged[id]) {
-          merged[id] = true
-          changed = true
-        }
-      }
-      return changed ? merged : prev
-    })
+    setOpen(groupsOpenForPath(pathname))
   }, [pathname])
 
   useEffect(() => {
     const id = window.setTimeout(() => {
-      activeLinkRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    }, 80)
+      const link = activeLinkRef.current
+      if (!link) return
+      // Mobile scrolls .ki-mobile-nav-body; desktop scrolls .ki-nav-scroll.
+      const scroller =
+        (link.closest('.ki-mobile-nav-body') as HTMLElement | null) ??
+        scrollRef.current
+      if (!scroller) return
+      const linkRect = link.getBoundingClientRect()
+      const box = scroller.getBoundingClientRect()
+      if (linkRect.top < box.top + 8 || linkRect.bottom > box.bottom - 8) {
+        const nextTop = scroller.scrollTop + (linkRect.top - box.top) - 56
+        scroller.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' })
+      }
+    }, 120)
     return () => window.clearTimeout(id)
   }, [pathname, open])
 

@@ -74,17 +74,22 @@
   }
 }
 
-/* Mobile offcanvas — fill width (no grey strip) + single thin scrollbar */
+/* Mobile offcanvas — full viewport height; body is the only scroll surface */
 #ki-dashboard-root .ki-mobile-nav.offcanvas {
   --bs-offcanvas-width: min(278px, 86vw);
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
   width: var(--bs-offcanvas-width);
   max-width: var(--bs-offcanvas-width);
-  height: 100%;
+  height: 100dvh;
   max-height: 100dvh;
   display: flex;
   flex-direction: column;
   background: var(--ki-panel);
   border-right: 1px solid var(--ki-border);
+  z-index: 1055;
 }
 
 #ki-dashboard-root .ki-mobile-nav-header {
@@ -94,32 +99,60 @@
 }
 
 #ki-dashboard-root .ki-mobile-nav-body.offcanvas-body {
-  display: flex;
-  flex-direction: column;
+  display: block;
   flex: 1 1 auto;
-  height: 0; /* force flex child to take remaining height so .ki-nav-scroll can overflow */
   min-height: 0;
-  overflow: hidden;
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   padding: 0;
   background: var(--ki-panel);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(212, 175, 55, 0.35) transparent;
 }
 
 #ki-dashboard-root .ki-sidebar--mobile {
   width: 100%;
   max-width: 100%;
-  height: 100%;
+  height: auto;
   min-height: 0;
   border-right: none;
-  flex: 1 1 auto;
+  flex: none;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
+}
+
+/* Nested nav scroller is desktop-only; mobile scrolls the offcanvas body */
+#ki-dashboard-root .ki-sidebar--mobile .ki-nav-scroll {
+  flex: none;
+  min-height: 0;
+  overflow: visible;
+  padding-bottom: 2rem;
 }
 
 /* Sidebar — brand row (seal + wordmark, Ki reference) */
 #ki-dashboard-root .ki-sidebar-brand {
   padding: 1rem 1rem 0.85rem;
   border-bottom: 1px solid var(--ki-border);
+  flex-shrink: 0;
+}
+
+@media (max-width: 991.98px) {
+  #ki-dashboard-root .ki-sidebar--mobile .ki-sidebar-brand {
+    padding: 0.65rem 1rem 0.55rem;
+  }
+
+  #ki-dashboard-root .ki-sidebar--mobile .ki-brand-seal {
+    width: 36px;
+    height: 36px;
+  }
+
+  #ki-dashboard-root .ki-sidebar--mobile .ki-profile-block {
+    padding: 0.55rem 1rem 0.65rem;
+  }
 }
 
 #ki-dashboard-root .ki-brand-lockup {
