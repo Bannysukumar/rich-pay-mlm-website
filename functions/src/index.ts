@@ -1865,7 +1865,9 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
   const rkRestIn = Number(settings.rankQualificationRestPercent ?? 50)
   const { p: rkPowerPct, r: rkRestPct } = normalizePowerRestPercent(rkPowerIn, rkRestIn)
 
-  const roiPercent = Number(pkg.roiPercent ?? 0)
+  /** From 1 Dec 2026 IST, new activations freeze at 1% even if catalog still shows higher. */
+  const catalogRoi = Number(pkg.roiPercent ?? 0)
+  const roiPercent = effectiveRoiPercentForNewActivation(catalogRoi)
   const durationDays = Number(pkg.durationDays ?? 0)
   const planWantCompound = planType === 2
   const pkgShelfRaw = String(pkg.packageShelf ?? 'investment').toLowerCase()
@@ -2018,6 +2020,8 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
     planType: planLabel,
     planSettingsVersionAtCapture: planSettingsVersion,
     activePackageId: apRef.id,
+    catalogRoiPercent: catalogRoi,
+    frozenRoiPercent: roiPercent,
   })
   return { activePackageId: apRef.id }
 })
@@ -3674,6 +3678,9 @@ export const adminSeedCompensationDefaults = onCall(callableRuntimeOpts, async (
 
 const ROI_CALENDAR_TZ = 'Asia/Kolkata'
 
+/** IST day when catalog + new activations switch to 1% daily ROI (existing packages stay frozen). */
+const DEC_2026_ONE_PERCENT_ROI_DAY = '2026-12-01'
+
 /** YYYY-MM-DD in IST for `when`. */
 function istDayKey(when = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -3682,6 +3689,13 @@ function istDayKey(when = new Date()): string {
     month: '2-digit',
     day: '2-digit',
   }).format(when)
+}
+
+/** New activations on/after Dec 1 2026 IST always freeze at 1% ROI; older catalog % ignored. */
+function effectiveRoiPercentForNewActivation(catalogRoiPercent: number, when = new Date()): number {
+  if (istDayKey(when) >= DEC_2026_ONE_PERCENT_ROI_DAY) return 1
+  const n = Number(catalogRoiPercent)
+  return Number.isFinite(n) ? n : 0
 }
 
 function normalizeRoiOffDates(raw: unknown): string[] {
@@ -4001,5 +4015,76 @@ export const processAutoWithdrawals = onSchedule(
     }
 
     await cfgRef.set({ lastAutoWithdrawalRunAt: Date.now() }, { merge: true })
+  },
+)
+
+/**
+ * One-shot (idempotent): on 1 Dec IST, set every catalog `packages.roiPercent` to 1.
+ * Does not rewrite existing `activePackages` — those keep frozen planSnapshot ROI.
+ */
+export const applyDec2026OnePercentRoiCatalog = onSchedule(
+  {
+    schedule: '0 0 1 12 *',
+    timeZone: ROI_CALENDAR_TZ,
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 120,
+    maxInstances: 1,
+  },
+  async () => {
+    const istDay = istDayKey()
+    if (istDay < DEC_2026_ONE_PERCENT_ROI_DAY) {
+      logger.info('applyDec2026OnePercentRoiCatalog: before cutover day, skip', { istDay })
+      return
+    }
+
+    const cfgRef = db.collection(COL_SETTINGS).doc('config')
+    const cfgSnap = await cfgRef.get()
+    const cfg = cfgSnap.data() ?? {}
+    if (cfg.dec2026OnePercentRoiAppliedAt) {
+      logger.info('applyDec2026OnePercentRoiCatalog: already applied', {
+        appliedAt: cfg.dec2026OnePercentRoiAppliedAt,
+      })
+      return
+    }
+
+    const snap = await db.collection(COL_PACKAGES).get()
+    let updated = 0
+    const batch = db.batch()
+    for (const docSnap of snap.docs) {
+      const prev = Number(docSnap.data()?.roiPercent ?? 0)
+      batch.set(
+        docSnap.ref,
+        {
+          roiPercent: 1,
+          updatedAt: Date.now(),
+          dec2026OnePercentRoiCatalog: true,
+        },
+        { merge: true },
+      )
+      updated++
+      logger.info('applyDec2026OnePercentRoiCatalog: package', {
+        id: docSnap.id,
+        name: docSnap.data()?.name,
+        previousRoiPercent: prev,
+        nextRoiPercent: 1,
+      })
+    }
+    batch.set(
+      cfgRef,
+      {
+        dec2026OnePercentRoiAppliedAt: Date.now(),
+        dec2026OnePercentRoiAppliedIstDay: istDay,
+        updatedAt: Date.now(),
+      },
+      { merge: true },
+    )
+    await batch.commit()
+
+    await audit('system-scheduler', 'applyDec2026OnePercentRoiCatalog', {
+      istDay,
+      packagesUpdated: updated,
+    })
+    logger.info('applyDec2026OnePercentRoiCatalog: done', { istDay, packagesUpdated: updated })
   },
 )

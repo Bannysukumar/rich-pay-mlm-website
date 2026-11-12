@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.dismissReferralCampaignBanner = exports.adminListReferralCampaignCompletions = exports.getReferralCampaignProgress = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminMemberWalletTransfer = exports.adminBulkWalletTransfer = exports.adminPreviewBulkWalletTransfer = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.adminResetMemberLoginPassword = exports.finalizeLoginPasswordChange = exports.requestPasswordReset = exports.completePasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
+exports.applyDec2026OnePercentRoiCatalog = exports.processAutoWithdrawals = exports.processDailyRankRewards = exports.processDailyRoi = exports.adminSeedCompensationDefaults = exports.adminBroadcastNotification = exports.dismissReferralCampaignBanner = exports.adminListReferralCampaignCompletions = exports.getReferralCampaignProgress = exports.adminDeleteMember = exports.adminUpdateMemberContact = exports.adminMemberWalletTransfer = exports.adminBulkWalletTransfer = exports.adminPreviewBulkWalletTransfer = exports.adminAdjustMemberBalances = exports.adminRepairWalletShadowFields = exports.adminFinalizeDeposit = exports.adminWithdrawalUpdate = exports.internalTransfer = exports.convertIncomeToActivation = exports.walletConvert = exports.createWithdrawal = exports.activatePackage = exports.adminResetMemberLoginPassword = exports.finalizeLoginPasswordChange = exports.requestPasswordReset = exports.completePasswordReset = exports.publicResolveReferrer = exports.resolveUsername = exports.listAllDownlines = exports.listDirectReferrals = exports.changeTransactionPassword = exports.updateMemberProfile = exports.registerWithProfile = void 0;
 const node_crypto_1 = require("node:crypto");
 const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -1619,7 +1619,9 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
     const rkPowerIn = Number(settings.rankQualificationPowerPercent ?? 50);
     const rkRestIn = Number(settings.rankQualificationRestPercent ?? 50);
     const { p: rkPowerPct, r: rkRestPct } = normalizePowerRestPercent(rkPowerIn, rkRestIn);
-    const roiPercent = Number(pkg.roiPercent ?? 0);
+    /** From 1 Dec 2026 IST, new activations freeze at 1% even if catalog still shows higher. */
+    const catalogRoi = Number(pkg.roiPercent ?? 0);
+    const roiPercent = effectiveRoiPercentForNewActivation(catalogRoi);
     const durationDays = Number(pkg.durationDays ?? 0);
     const planWantCompound = planType === 2;
     const pkgShelfRaw = String(pkg.packageShelf ?? 'investment').toLowerCase();
@@ -1741,6 +1743,8 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
         planType: planLabel,
         planSettingsVersionAtCapture: planSettingsVersion,
         activePackageId: apRef.id,
+        catalogRoiPercent: catalogRoi,
+        frozenRoiPercent: roiPercent,
     });
     return { activePackageId: apRef.id };
 });
@@ -3153,6 +3157,8 @@ exports.adminSeedCompensationDefaults = (0, https_1.onCall)(callableRuntimeOpts,
     };
 });
 const ROI_CALENDAR_TZ = 'Asia/Kolkata';
+/** IST day when catalog + new activations switch to 1% daily ROI (existing packages stay frozen). */
+const DEC_2026_ONE_PERCENT_ROI_DAY = '2026-12-01';
 /** YYYY-MM-DD in IST for `when`. */
 function istDayKey(when = new Date()) {
     return new Intl.DateTimeFormat('en-CA', {
@@ -3161,6 +3167,13 @@ function istDayKey(when = new Date()) {
         month: '2-digit',
         day: '2-digit',
     }).format(when);
+}
+/** New activations on/after Dec 1 2026 IST always freeze at 1% ROI; older catalog % ignored. */
+function effectiveRoiPercentForNewActivation(catalogRoiPercent, when = new Date()) {
+    if (istDayKey(when) >= DEC_2026_ONE_PERCENT_ROI_DAY)
+        return 1;
+    const n = Number(catalogRoiPercent);
+    return Number.isFinite(n) ? n : 0;
 }
 function normalizeRoiOffDates(raw) {
     if (!Array.isArray(raw))
@@ -3441,5 +3454,61 @@ exports.processAutoWithdrawals = (0, scheduler_1.onSchedule)({
         });
     }
     await cfgRef.set({ lastAutoWithdrawalRunAt: Date.now() }, { merge: true });
+});
+/**
+ * One-shot (idempotent): on 1 Dec IST, set every catalog `packages.roiPercent` to 1.
+ * Does not rewrite existing `activePackages` — those keep frozen planSnapshot ROI.
+ */
+exports.applyDec2026OnePercentRoiCatalog = (0, scheduler_1.onSchedule)({
+    schedule: '0 0 1 12 *',
+    timeZone: ROI_CALENDAR_TZ,
+    region: 'us-central1',
+    memory: '256MiB',
+    timeoutSeconds: 120,
+    maxInstances: 1,
+}, async () => {
+    const istDay = istDayKey();
+    if (istDay < DEC_2026_ONE_PERCENT_ROI_DAY) {
+        v2_1.logger.info('applyDec2026OnePercentRoiCatalog: before cutover day, skip', { istDay });
+        return;
+    }
+    const cfgRef = db.collection(COL_SETTINGS).doc('config');
+    const cfgSnap = await cfgRef.get();
+    const cfg = cfgSnap.data() ?? {};
+    if (cfg.dec2026OnePercentRoiAppliedAt) {
+        v2_1.logger.info('applyDec2026OnePercentRoiCatalog: already applied', {
+            appliedAt: cfg.dec2026OnePercentRoiAppliedAt,
+        });
+        return;
+    }
+    const snap = await db.collection(COL_PACKAGES).get();
+    let updated = 0;
+    const batch = db.batch();
+    for (const docSnap of snap.docs) {
+        const prev = Number(docSnap.data()?.roiPercent ?? 0);
+        batch.set(docSnap.ref, {
+            roiPercent: 1,
+            updatedAt: Date.now(),
+            dec2026OnePercentRoiCatalog: true,
+        }, { merge: true });
+        updated++;
+        v2_1.logger.info('applyDec2026OnePercentRoiCatalog: package', {
+            id: docSnap.id,
+            name: docSnap.data()?.name,
+            previousRoiPercent: prev,
+            nextRoiPercent: 1,
+        });
+    }
+    batch.set(cfgRef, {
+        dec2026OnePercentRoiAppliedAt: Date.now(),
+        dec2026OnePercentRoiAppliedIstDay: istDay,
+        updatedAt: Date.now(),
+    }, { merge: true });
+    await batch.commit();
+    await audit('system-scheduler', 'applyDec2026OnePercentRoiCatalog', {
+        istDay,
+        packagesUpdated: updated,
+    });
+    v2_1.logger.info('applyDec2026OnePercentRoiCatalog: done', { istDay, packagesUpdated: updated });
 });
 //# sourceMappingURL=index.js.map

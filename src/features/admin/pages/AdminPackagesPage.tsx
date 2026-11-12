@@ -34,11 +34,12 @@ const PDF_PLAN_TIERS_SEED: Array<{
   maxRoiMultiplier: number
   sortOrder: number
 }> = [
+  // From 1 Dec 2026 IST, live catalog + new activations use 1% ROI (existing packages stay frozen).
   { name: 'Tier 1', minAmount: 100, maxAmount: 100, roiPercent: 1, durationDays: 200, maxRoiMultiplier: 2, sortOrder: 10 },
-  { name: 'Tier 2', minAmount: 200, maxAmount: 200, roiPercent: 2, durationDays: 100, maxRoiMultiplier: 2, sortOrder: 20 },
-  { name: 'Tier 3', minAmount: 300, maxAmount: 300, roiPercent: 3, durationDays: 66, maxRoiMultiplier: 2, sortOrder: 30 },
-  { name: 'Tier 4', minAmount: 400, maxAmount: 400, roiPercent: 4, durationDays: 50, maxRoiMultiplier: 2, sortOrder: 40 },
-  { name: 'Tier 5', minAmount: 500, maxAmount: 500, roiPercent: 5, durationDays: 40, maxRoiMultiplier: 2, sortOrder: 50 },
+  { name: 'Tier 2', minAmount: 200, maxAmount: 200, roiPercent: 1, durationDays: 200, maxRoiMultiplier: 2, sortOrder: 20 },
+  { name: 'Tier 3', minAmount: 300, maxAmount: 300, roiPercent: 1, durationDays: 133, maxRoiMultiplier: 2, sortOrder: 30 },
+  { name: 'Tier 4', minAmount: 400, maxAmount: 400, roiPercent: 1, durationDays: 133, maxRoiMultiplier: 2, sortOrder: 40 },
+  { name: 'Tier 5', minAmount: 500, maxAmount: 500, roiPercent: 1, durationDays: 133, maxRoiMultiplier: 2, sortOrder: 50 },
 ]
 
 type Row = PackageDef & {
