@@ -145,8 +145,9 @@ export function TeamLevelBonusPage() {
                 </p>
                 <div className="alert alert-secondary border small mb-3" role="status">
                   <strong>Progress</strong> means which sharing day it was (example: Day 2 of 50). Different packages
-                  share for different lengths — often about half of the plan days (100-day plan ≈ 50 days, 200-day
-                  plan ≈ 100 days). Seeing 50 on one row and 100 on another is normal.
+                  share for different lengths — often about half of the plan days (100-day plan ≈ 50 sharing days,
+                  200-day plan ≈ 100). Saturday and Sunday are holidays: no credit that day, and those days do not
+                  count toward the sharing total. Seeing 50 on one row and 100 on another is normal.
                 </div>
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">

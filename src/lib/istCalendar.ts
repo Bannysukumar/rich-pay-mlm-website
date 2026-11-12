@@ -91,7 +91,36 @@ export function wholeIstDaysSinceStart(startedAtMs: number, asOfMs: number): num
   return wholeIstCalendarDaysBetween(istDayKey(new Date(startedAtMs)), istDayKey(new Date(asOfMs)))
 }
 
-/** Remaining team-level payout window days for a downline stake as of `asOfMs`. */
+/**
+ * Paying days elapsed since package start (skips ROI-off weekdays).
+ * Default off weekdays: Sunday(0) + Saturday(6), matching site `roiOffWeekdays`.
+ */
+export function payingIstDaysSinceStart(
+  startedAtMs: number,
+  asOfMs: number,
+  offWeekdays: number[] = [0, 6],
+): number {
+  const startKey = istDayKey(new Date(startedAtMs))
+  const endKey = istDayKey(new Date(asOfMs))
+  const [sy, sm, sd] = startKey.split('-').map(Number)
+  const [ey, em, ed] = endKey.split('-').map(Number)
+  let cursor = Date.UTC(sy, sm - 1, sd)
+  const endMs = Date.UTC(ey, em - 1, ed)
+  if (endMs <= cursor) return 0
+  const off = new Set(offWeekdays)
+  let paid = 0
+  for (let guard = 0; guard < 8000 && cursor < endMs; guard++) {
+    const when = new Date(cursor + 12 * 3600000)
+    const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short' }).format(when)
+    const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+    const idx = map[wd] ?? 0
+    if (!off.has(idx)) paid++
+    cursor += 86400000
+  }
+  return paid
+}
+
+/** Remaining team-level payout window days for a downline stake as of `asOfMs` (paying days only). */
 export function remainingTeamLevelWindowDays(
   startedAtMs: number,
   maxPayDays: number | null | undefined,
@@ -99,6 +128,6 @@ export function remainingTeamLevelWindowDays(
 ): number | null {
   if (maxPayDays === undefined) return null
   if (maxPayDays === null) return null
-  const elapsed = wholeIstDaysSinceStart(startedAtMs, asOfMs)
+  const elapsed = payingIstDaysSinceStart(startedAtMs, asOfMs)
   return Math.max(0, maxPayDays - elapsed)
 }

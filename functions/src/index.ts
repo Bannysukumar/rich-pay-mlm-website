@@ -629,7 +629,38 @@ function wholeDaysSincePackageStart(startedAt: Timestamp, now: Timestamp): numbe
   return Math.max(0, Math.floor((nowMs - startMs) / 86400000))
 }
 
-/** Cap % and max paying calendar days for this matrix row (null max = no day cap when plan duration unset). */
+/**
+ * Paying days elapsed from package start through `now` (same half-open window as calendar
+ * `wholeDaysSincePackageStart`). ROI-off weekdays/dates (e.g. Sat/Sun) are not counted, so the
+ * team-level 50-day share window stretches across holidays instead of burning them.
+ */
+function payingDaysElapsedSincePackageStart(
+  startedAt: Timestamp,
+  now: Timestamp,
+  offWeekdays: number[],
+  offDates: string[],
+): number {
+  const startDay = istDayKey(new Date(startedAt.toMillis()))
+  const nowDay = istDayKey(new Date(now.toMillis()))
+  const [sy, sm, sd] = startDay.split('-').map(Number)
+  const [ny, nm, nd] = nowDay.split('-').map(Number)
+  let cursor = Date.UTC(sy, sm - 1, sd)
+  const endMs = Date.UTC(ny, nm - 1, nd)
+  if (endMs <= cursor) return 0
+  const offW = new Set(offWeekdays)
+  const offD = new Set(offDates)
+  let paid = 0
+  for (let guard = 0; guard < 8000 && cursor < endMs; guard++) {
+    // Noon UTC on the Y-M-D key → stable IST weekday for that calendar day.
+    const when = new Date(cursor + 12 * 3600000)
+    const key = istDayKey(when)
+    if (!offW.has(istWeekdayIndex(when)) && !offD.has(key)) paid++
+    cursor += 86400000
+  }
+  return paid
+}
+
+/** Cap % and max paying days for this matrix row (null max = no day cap when plan duration unset). */
 function teamLevelWindowCapMaxPayDays(
   row: FrozenTeamRow,
   planDurationDays: number,
@@ -651,7 +682,8 @@ function teamLevelWindowCapMaxPayDays(
 
 /**
  * When downline plan has a positive duration, upline earns this row only while
- * `elapsedDays < floor(durationDays × capPercent / 100)`. Missing cap on old snapshots uses
+ * paying-days elapsed < floor(durationDays × capPercent / 100). ROI-off days (Sat/Sun by
+ * default) do not consume the window. Missing cap on old snapshots uses
  * `DEFAULT_UPLINE_DURATION_CAP_PERCENT`.
  */
 function teamLevelPayoutWithinDownlinePlanWindow(
@@ -659,11 +691,13 @@ function teamLevelPayoutWithinDownlinePlanWindow(
   startedAt: Timestamp,
   now: Timestamp,
   planDurationDays: number,
+  offWeekdays: number[],
+  offDates: string[],
 ): boolean {
   const { maxPayDays } = teamLevelWindowCapMaxPayDays(row, planDurationDays)
   if (maxPayDays === null) return true
   if (maxPayDays <= 0) return false
-  const elapsed = wholeDaysSincePackageStart(startedAt, now)
+  const elapsed = payingDaysElapsedSincePackageStart(startedAt, now, offWeekdays, offDates)
   return elapsed < maxPayDays
 }
 
@@ -729,7 +763,13 @@ async function distributeTeamLevelIncomeFromDailyRoi(
   downlineUid: string,
   dailyRoiCredited: number,
   planSnap: Record<string, unknown>,
-  payoutClock: { startedAt: Timestamp; now: Timestamp; durationDays: number },
+  payoutClock: {
+    startedAt: Timestamp
+    now: Timestamp
+    durationDays: number
+    offWeekdays: number[]
+    offDates: string[]
+  },
 ) {
   if (dailyRoiCredited <= 1e-12) return
 
@@ -754,7 +794,16 @@ async function distributeTeamLevelIncomeFromDailyRoi(
     if (!upl) break
 
     if (row && row.percent > 0) {
-      if (!teamLevelPayoutWithinDownlinePlanWindow(row, payoutClock.startedAt, payoutClock.now, payoutClock.durationDays)) {
+      if (
+        !teamLevelPayoutWithinDownlinePlanWindow(
+          row,
+          payoutClock.startedAt,
+          payoutClock.now,
+          payoutClock.durationDays,
+          payoutClock.offWeekdays,
+          payoutClock.offDates,
+        )
+      ) {
         child = upl
         continue
       }
@@ -787,7 +836,12 @@ async function distributeTeamLevelIncomeFromDailyRoi(
                 },
                 { merge: true },
               )
-            const elapsedDays = wholeDaysSincePackageStart(payoutClock.startedAt, payoutClock.now)
+            const elapsedDays = payingDaysElapsedSincePackageStart(
+              payoutClock.startedAt,
+              payoutClock.now,
+              payoutClock.offWeekdays,
+              payoutClock.offDates,
+            )
             const remainingDays =
               maxPayDays != null ? Math.max(0, maxPayDays - elapsedDays) : null
             await db.collection('teamLevelBonuses').add({
@@ -3851,6 +3905,8 @@ export const processDailyRoi = onSchedule(
       startedAt,
       now,
       durationDays,
+      offWeekdays: normalizeRoiOffWeekdays(settings.roiOffWeekdays),
+      offDates: normalizeRoiOffDates(settings.roiOffDates),
     })
     alreadyCredited.add(docSnap.id)
   }
