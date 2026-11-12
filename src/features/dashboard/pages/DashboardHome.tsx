@@ -42,6 +42,7 @@ function isNewSchemaPackage(planSnapshot: unknown): boolean {
 }
 
 type PkgIncomeRow = {
+  id: string
   status: string
   /** True when this row counts toward "Active packages (total)" and live working-cap split. */
   liveActive: boolean
@@ -51,6 +52,7 @@ type PkgIncomeRow = {
   nwMult: number
   wMult: number
   packageName: string
+  startedAtMs: number
 }
 
 /**
@@ -222,8 +224,8 @@ export function DashboardHome() {
         const rows: PkgIncomeRow[] = []
         const siteW = Number(settings.workingIncomeCapMultiplier ?? 1)
         const siteNw = Number(settings.nonWorkingIncomeCapMultiplier ?? 2)
-        snap.forEach((doc) => {
-          const d = doc.data() as Record<string, unknown>
+        snap.forEach((docSnap) => {
+          const d = docSnap.data() as Record<string, unknown>
           const status = String(d.status ?? 'active').toLowerCase()
           const liveActive = isLiveActivePackage(d)
           if (liveActive) {
@@ -243,7 +245,13 @@ export function DashboardHome() {
                 ? Number(ps.nonWorkingIncomeCapMultiplier)
                 : siteNw),
           )
+          const started = d.startedAt as { toMillis?: () => number } | number | undefined
+          const startedAtMs =
+            started && typeof (started as { toMillis?: () => number }).toMillis === 'function'
+              ? (started as { toMillis: () => number }).toMillis()
+              : Number(started ?? 0) || 0
           rows.push({
+            id: docSnap.id,
             status,
             liveActive,
             amount: Number(d.amount ?? 0),
@@ -252,6 +260,7 @@ export function DashboardHome() {
             nwMult: Number.isFinite(nwMult) && nwMult >= 0 ? nwMult : siteNw,
             wMult: Number.isFinite(wMult) && wMult >= 0 ? wMult : siteW,
             packageName: String(ps?.packageName ?? d.packageName ?? 'Package'),
+            startedAtMs,
           })
         })
         setActivePackageTotal(sum)
@@ -327,6 +336,45 @@ export function DashboardHome() {
     return deriveIncomeCapHud(stakes, profile?.totalWorkingIncome ?? 0)
   }, [pkgIncomeRows, profile?.totalWorkingIncome])
 
+  /** Per-package lines so members see each investment separately (not only the combined total). */
+  const perPackageCapRows = useMemo(() => {
+    return pkgIncomeRows
+      .filter((p) => p.liveActive)
+      .slice()
+      .sort((a, b) => b.startedAtMs - a.startedAtMs)
+      .map((p, idx, arr) => {
+        const amt = Math.max(0, p.amount)
+        const roiCap = amt * Math.max(0, p.nwMult)
+        const pkgCap = amt * (Math.max(0, p.nwMult) + Math.max(0, p.wMult))
+        const roiPaid = Math.max(0, p.nonWorkingPaid)
+        const roiLeft = Math.max(0, roiCap - roiPaid)
+        const startedLabel = p.startedAtMs
+          ? new Date(p.startedAtMs).toLocaleDateString(undefined, {
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric',
+            })
+          : '—'
+        return {
+          id: p.id,
+          title: arr.length > 1 ? `Package ${arr.length - idx}` : p.packageName || 'Package',
+          packageName: p.packageName,
+          startedLabel,
+          amount: amt,
+          roiPaid,
+          roiCap,
+          roiLeft,
+          pkgCap,
+          roiPct: roiCap > 1e-9 ? Math.min(100, Math.round((roiPaid / roiCap) * 1000) / 10) : 0,
+        }
+      })
+  }, [pkgIncomeRows])
+
+  const activePackagesSub =
+    perPackageCapRows.length > 1
+      ? perPackageCapRows.map((p) => `$ ${fmt(p.amount)}`).join(' + ')
+      : undefined
+
   const showCampaignBanner = useMemo(() => {
     const c = campaignProgress?.campaign
     if (!c?.bannerEnabled) return false
@@ -389,12 +437,21 @@ export function DashboardHome() {
         ? 'Max per request: — (activate a package first)'
         : `Max per request: $ ${fmt(maxWithdrawThisCycle)}`
 
-  type Stat = { label: string; value: string; tone: 'warning' | 'primary' | 'danger' | 'success' }
+  type Stat = {
+    label: string
+    value: string
+    tone: 'warning' | 'primary' | 'danger' | 'success'
+    sub?: string
+  }
   const row1: Stat[] = [
     {
-      label: 'Active packages (total)',
+      label:
+        perPackageCapRows.length > 1
+          ? `Active Packages (Total · ${perPackageCapRows.length} plans)`
+          : 'Active Packages (Total)',
       value: activePackageTotal === undefined ? '$ …' : `$ ${fmt(activePackageTotal)}`,
       tone: 'warning',
+      sub: activePackagesSub,
     },
     { label: 'Cash Wallet', value: `$ ${fmt(profile.wallets.cash)}`, tone: 'primary' },
     { label: 'Activation Wallet', value: `$ ${fmt(profile.wallets.activation)}`, tone: 'danger' },
@@ -456,7 +513,12 @@ export function DashboardHome() {
             >
               {c.value}
             </h3>
-            <p className="mg-b-35 f-w-600 txt-ellipsis-1">{c.label}</p>
+            <p className="mg-b-0 f-w-600 txt-ellipsis-1">{c.label}</p>
+            {c.sub ? (
+              <p className="small mb-0 mt-1 txt-ellipsis-2" style={{ color: '#aaa', fontWeight: 500 }}>
+                {c.sub}
+              </p>
+            ) : null}
           </div>
         </div>
       ))}
@@ -567,12 +629,9 @@ export function DashboardHome() {
                     Your 3× income limit
                   </h4>
                   <p className="small mb-0" style={{ color: '#aaa' }}>
-                    Active packages: <strong className="text-light">$ {fmt(incomeCapHud.activeStake)}</strong>
-                    {incomeCapHud.packageCount > 1
-                      ? ` (${incomeCapHud.packageCount} packages — each pays its own daily profit)`
-                      : null}
-                    {' · '}
-                    Max you can earn: <strong className="text-light">$ {fmt(incomeCapHud.totalCap)}</strong> (3×)
+                    Each package is counted separately below. Combined max:{' '}
+                    <strong className="text-light">$ {fmt(incomeCapHud.totalCap)}</strong> (3× of{' '}
+                    <strong className="text-light">$ {fmt(incomeCapHud.activeStake)}</strong> active stake)
                   </p>
                 </div>
                 <div className="text-end">
@@ -602,11 +661,68 @@ export function DashboardHome() {
                 />
               </div>
 
+              {perPackageCapRows.length > 0 ? (
+                <div className="row g-3 mb-3">
+                  {perPackageCapRows.map((pkg) => (
+                    <div key={pkg.id} className="col-md-6">
+                      <div
+                        className="p-3 rounded h-100"
+                        style={{
+                          background: 'rgba(255,255,255,0.03)',
+                          border: '1px solid rgba(212,175,55,0.22)',
+                        }}
+                      >
+                        <div className="d-flex justify-content-between align-items-start gap-2 mb-2">
+                          <div>
+                            <div className="fw-semibold text-light">{pkg.title}</div>
+                            <div className="small" style={{ color: '#888' }}>
+                              {pkg.packageName} · started {pkg.startedLabel}
+                            </div>
+                          </div>
+                          <div className="text-end">
+                            <div className="fw-bold" style={{ color: '#d4af37' }}>
+                              $ {fmt(pkg.amount)}
+                            </div>
+                            <div className="small" style={{ color: '#888' }}>
+                              invested
+                            </div>
+                          </div>
+                        </div>
+                        <div
+                          className="progress mb-2"
+                          style={{ height: 6, background: 'rgba(255,255,255,0.08)' }}
+                        >
+                          <div
+                            className="progress-bar"
+                            style={{
+                              width: `${Math.min(100, pkg.roiPct)}%`,
+                              background: '#d4af37',
+                            }}
+                          />
+                        </div>
+                        <div className="small mb-1" style={{ color: '#aaa' }}>
+                          Daily profit (upto 2×):{' '}
+                          <strong className="text-light">
+                            $ {fmt(pkg.roiPaid)} / $ {fmt(pkg.roiCap)}
+                          </strong>
+                        </div>
+                        <div className="small mb-1" style={{ color: pkg.roiLeft > 0 ? '#8dcea0' : '#e8a0a0' }}>
+                          Daily left on this package: $ {fmt(pkg.roiLeft)}
+                        </div>
+                        <div className="small mb-0" style={{ color: '#aaa' }}>
+                          This package max (3×): <strong className="text-light">$ {fmt(pkg.pkgCap)}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
               <div className="row g-3 mb-3">
                 <div className="col-md-4">
                   <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
                     <div className="small" style={{ color: '#aaa' }}>
-                      Daily profit (up to 2×)
+                      All packages — daily profit
                     </div>
                     <div className="fw-semibold text-light">
                       $ {fmt(incomeCapHud.roiPaid)} / $ {fmt(incomeCapHud.roiCap)}
@@ -621,7 +737,7 @@ export function DashboardHome() {
                 <div className="col-md-4">
                   <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
                     <div className="small" style={{ color: '#aaa' }}>
-                      Sponsor + team + rank (until 3× total)
+                      Sponsor + team + rank (shared until 3×)
                     </div>
                     <div className="fw-semibold text-light">
                       $ {fmt(incomeCapHud.workingPaid)} / $ {fmt(incomeCapHud.workingCap)}
@@ -636,7 +752,7 @@ export function DashboardHome() {
                 <div className="col-md-4">
                   <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
                     <div className="small" style={{ color: '#aaa' }}>
-                      Total earned vs 3×
+                      Combined total vs 3×
                     </div>
                     <div className="fw-semibold text-light">
                       $ {fmt(incomeCapHud.totalPaid)} / $ {fmt(incomeCapHud.totalCap)}

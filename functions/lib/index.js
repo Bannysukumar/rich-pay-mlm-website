@@ -295,29 +295,12 @@ function workingIncomeCreditedTotal(ud) {
         Number(ud.teamLevelCommissionTotal ?? 0) +
         Number(ud.rankCommissionTotal ?? 0));
 }
-/** Σ (principal × frozen working mult) across this member’s active packages. */
-async function computeUserWorkingIncomeCeiling(uid) {
-    const snap = await db.collection(COL_ACTIVE).where('userId', '==', uid).where('status', '==', 'active').get();
-    let sum = 0;
-    for (const d of snap.docs) {
-        const x = d.data();
-        const amt = Number(x.amount ?? 0);
-        const ps = x.planSnapshot;
-        const mult = Number(x.frozenWorkingCapMultiplier ??
-            (ps != null && ps.workingIncomeCapMultiplier != null ? Number(ps.workingIncomeCapMultiplier) : undefined) ??
-            3);
-        sum += amt * Math.max(0, mult);
-    }
-    return sum;
-}
+/**
+ * Room left for sponsor / team level / rank. These keep paying past any 1× working
+ * snapshot until the member’s combined 3× total income ceiling is full.
+ */
 async function userWorkingIncomeRemaining(uid) {
-    const us = await db.collection(COL_USERS).doc(uid).get();
-    const ceiling = await computeUserWorkingIncomeCeiling(uid);
-    const credited = workingIncomeCreditedTotal(us.data());
-    const workingRoom = Math.max(0, ceiling - credited);
-    if (workingRoom <= 1e-9)
-        return 0;
-    return Math.min(workingRoom, await userTotalIncomeRemaining(uid));
+    return userTotalIncomeRemaining(uid);
 }
 /**
  * Combined ceiling: Σ stake × (non-working mult + working mult) over active packages, minus
@@ -598,7 +581,34 @@ function wholeDaysSincePackageStart(startedAt, now) {
     const nowMs = Date.UTC(ny, nm - 1, nd);
     return Math.max(0, Math.floor((nowMs - startMs) / 86400000));
 }
-/** Cap % and max paying calendar days for this matrix row (null max = no day cap when plan duration unset). */
+/**
+ * Paying days elapsed from package start through `now` (same half-open window as calendar
+ * `wholeDaysSincePackageStart`). ROI-off weekdays/dates (e.g. Sat/Sun) are not counted, so the
+ * team-level 50-day share window stretches across holidays instead of burning them.
+ */
+function payingDaysElapsedSincePackageStart(startedAt, now, offWeekdays, offDates) {
+    const startDay = istDayKey(new Date(startedAt.toMillis()));
+    const nowDay = istDayKey(new Date(now.toMillis()));
+    const [sy, sm, sd] = startDay.split('-').map(Number);
+    const [ny, nm, nd] = nowDay.split('-').map(Number);
+    let cursor = Date.UTC(sy, sm - 1, sd);
+    const endMs = Date.UTC(ny, nm - 1, nd);
+    if (endMs <= cursor)
+        return 0;
+    const offW = new Set(offWeekdays);
+    const offD = new Set(offDates);
+    let paid = 0;
+    for (let guard = 0; guard < 8000 && cursor < endMs; guard++) {
+        // Noon UTC on the Y-M-D key → stable IST weekday for that calendar day.
+        const when = new Date(cursor + 12 * 3600000);
+        const key = istDayKey(when);
+        if (!offW.has(istWeekdayIndex(when)) && !offD.has(key))
+            paid++;
+        cursor += 86400000;
+    }
+    return paid;
+}
+/** Cap % and max paying days for this matrix row (null max = no day cap when plan duration unset). */
 function teamLevelWindowCapMaxPayDays(row, planDurationDays) {
     const dur = Math.max(0, Math.floor(planDurationDays));
     const rawCap = row.uplineDurationCapPercent != null
@@ -614,16 +624,17 @@ function teamLevelWindowCapMaxPayDays(row, planDurationDays) {
 }
 /**
  * When downline plan has a positive duration, upline earns this row only while
- * `elapsedDays < floor(durationDays × capPercent / 100)`. Missing cap on old snapshots uses
+ * paying-days elapsed < floor(durationDays × capPercent / 100). ROI-off days (Sat/Sun by
+ * default) do not consume the window. Missing cap on old snapshots uses
  * `DEFAULT_UPLINE_DURATION_CAP_PERCENT`.
  */
-function teamLevelPayoutWithinDownlinePlanWindow(row, startedAt, now, planDurationDays) {
+function teamLevelPayoutWithinDownlinePlanWindow(row, startedAt, now, planDurationDays, offWeekdays, offDates) {
     const { maxPayDays } = teamLevelWindowCapMaxPayDays(row, planDurationDays);
     if (maxPayDays === null)
         return true;
     if (maxPayDays <= 0)
         return false;
-    const elapsed = wholeDaysSincePackageStart(startedAt, now);
+    const elapsed = payingDaysElapsedSincePackageStart(startedAt, now, offWeekdays, offDates);
     return elapsed < maxPayDays;
 }
 function teamMatrixHasPayablePercent(rows) {
@@ -699,7 +710,7 @@ async function distributeTeamLevelIncomeFromDailyRoi(downlineActivePackageId, do
         if (!upl)
             break;
         if (row && row.percent > 0) {
-            if (!teamLevelPayoutWithinDownlinePlanWindow(row, payoutClock.startedAt, payoutClock.now, payoutClock.durationDays)) {
+            if (!teamLevelPayoutWithinDownlinePlanWindow(row, payoutClock.startedAt, payoutClock.now, payoutClock.durationDays, payoutClock.offWeekdays, payoutClock.offDates)) {
                 child = upl;
                 continue;
             }
@@ -729,7 +740,7 @@ async function distributeTeamLevelIncomeFromDailyRoi(downlineActivePackageId, do
                             workingIncomeEarned: firestore_1.FieldValue.increment(payAmt),
                             updatedAt: Date.now(),
                         }, { merge: true });
-                        const elapsedDays = wholeDaysSincePackageStart(payoutClock.startedAt, payoutClock.now);
+                        const elapsedDays = payingDaysElapsedSincePackageStart(payoutClock.startedAt, payoutClock.now, payoutClock.offWeekdays, payoutClock.offDates);
                         const remainingDays = maxPayDays != null ? Math.max(0, maxPayDays - elapsedDays) : null;
                         await db.collection('teamLevelBonuses').add({
                             userId: upl,
@@ -3306,7 +3317,7 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
             2);
         const cap = amount * Math.max(nwMult, 0);
         const headroom = Math.max(0, cap - nonWorkingPaid);
-        /** NW bucket full — stay `active` so sponsor/team income can continue until plan ends or working cap is hit. */
+        /** NW bucket full — stay `active` so sponsor/team income can continue until total 3× is hit. */
         if (headroom <= 1e-12) {
             continue;
         }
@@ -3345,6 +3356,8 @@ exports.processDailyRoi = (0, scheduler_1.onSchedule)({
             startedAt,
             now,
             durationDays,
+            offWeekdays: normalizeRoiOffWeekdays(settings.roiOffWeekdays),
+            offDates: normalizeRoiOffDates(settings.roiOffDates),
         });
         alreadyCredited.add(docSnap.id);
     }
