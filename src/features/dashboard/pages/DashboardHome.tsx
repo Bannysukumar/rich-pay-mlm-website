@@ -333,8 +333,21 @@ export function DashboardHome() {
       wMult: p.wMult,
       packageName: p.packageName,
     }))
-    return deriveIncomeCapHud(stakes, profile?.totalWorkingIncome ?? 0)
-  }, [pkgIncomeRows, profile?.totalWorkingIncome])
+    const hasReferralPath =
+      Number(profile?.activeDirects ?? 0) > 0 ||
+      Number(profile?.sponsorBonusTotal ?? 0) > 0 ||
+      Number(profile?.teamLevelCommissionTotal ?? 0) > 0 ||
+      Number(profile?.rankCommissionTotal ?? 0) > 0 ||
+      Number(profile?.totalWorkingIncome ?? 0) > 0
+    return deriveIncomeCapHud(stakes, profile?.totalWorkingIncome ?? 0, { hasReferralPath })
+  }, [
+    pkgIncomeRows,
+    profile?.totalWorkingIncome,
+    profile?.activeDirects,
+    profile?.sponsorBonusTotal,
+    profile?.teamLevelCommissionTotal,
+    profile?.rankCommissionTotal,
+  ])
 
   /** Per-package lines so members see each investment separately (not only the combined total). */
   const perPackageCapRows = useMemo(() => {
@@ -626,20 +639,36 @@ export function DashboardHome() {
               <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
                 <div>
                   <h4 className="mb-1" style={{ color: '#d4af37', fontWeight: 700 }}>
-                    Your 3× income limit
+                    {incomeCapHud.hasReferralPath ? 'Your income limit (2× daily + 1× referral)' : 'Your daily ROI (2×)'}
                   </h4>
                   <p className="small mb-0" style={{ color: '#aaa' }}>
-                    Each package is counted separately below. Combined max:{' '}
-                    <strong className="text-light">$ {fmt(incomeCapHud.totalCap)}</strong> (3× of{' '}
-                    <strong className="text-light">$ {fmt(incomeCapHud.activeStake)}</strong> active stake)
+                    {incomeCapHud.hasReferralPath ? (
+                      <>
+                        Daily upto <strong className="text-light">$ {fmt(incomeCapHud.roiCap)}</strong> (2×) · Referral
+                        extra upto <strong className="text-light">$ {fmt(incomeCapHud.workingSoftCap)}</strong> (1×) ·
+                        Combined max <strong className="text-light">$ {fmt(incomeCapHud.totalCap)}</strong> (3× of{' '}
+                        <strong className="text-light">$ {fmt(incomeCapHud.activeStake)}</strong>)
+                      </>
+                    ) : (
+                      <>
+                        Max from this plan without referrals:{' '}
+                        <strong className="text-light">$ {fmt(incomeCapHud.roiCap)}</strong> (2× of{' '}
+                        <strong className="text-light">$ {fmt(incomeCapHud.activeStake)}</strong>). Only one active
+                        package at a time.
+                      </>
+                    )}
                   </p>
                 </div>
                 <div className="text-end">
                   <div className="fw-bold" style={{ color: '#d4af37', fontSize: '1.25rem' }}>
-                    {incomeCapHud.progressPct}%
+                    {incomeCapHud.hasReferralPath
+                      ? `${incomeCapHud.progressPct}%`
+                      : incomeCapHud.roiCap > 0
+                        ? `${Math.min(100, Math.round((incomeCapHud.roiPaid / incomeCapHud.roiCap) * 1000) / 10)}%`
+                        : '0%'}
                   </div>
                   <div className="small" style={{ color: '#888' }}>
-                    of 3× used
+                    {incomeCapHud.hasReferralPath ? 'of 3× used' : 'of 2× daily used'}
                   </div>
                 </div>
               </div>
@@ -655,8 +684,15 @@ export function DashboardHome() {
                 <div
                   className="progress-bar"
                   style={{
-                    width: `${Math.min(100, incomeCapHud.progressPct)}%`,
-                    background: incomeCapHud.allStopped ? '#c45c5c' : '#d4af37',
+                    width: `${Math.min(
+                      100,
+                      incomeCapHud.hasReferralPath
+                        ? incomeCapHud.progressPct
+                        : incomeCapHud.roiCap > 0
+                          ? (incomeCapHud.roiPaid / incomeCapHud.roiCap) * 100
+                          : 0,
+                    )}%`,
+                    background: incomeCapHud.roiStopped || incomeCapHud.allStopped ? '#c45c5c' : '#d4af37',
                   }}
                 />
               </div>
@@ -707,10 +743,12 @@ export function DashboardHome() {
                           </strong>
                         </div>
                         <div className="small mb-1" style={{ color: pkg.roiLeft > 0 ? '#8dcea0' : '#e8a0a0' }}>
-                          Daily left on this package: $ {fmt(pkg.roiLeft)}
+                          Daily left: $ {fmt(pkg.roiLeft)}
                         </div>
                         <div className="small mb-0" style={{ color: '#aaa' }}>
-                          This package max (3×): <strong className="text-light">$ {fmt(pkg.pkgCap)}</strong>
+                          {incomeCapHud.hasReferralPath
+                            ? <>Package max with referrals (3×): <strong className="text-light">$ {fmt(pkg.pkgCap)}</strong></>
+                            : <>Plan max without referrals (2×): <strong className="text-light">$ {fmt(pkg.roiCap)}</strong></>}
                         </div>
                       </div>
                     </div>
@@ -719,51 +757,72 @@ export function DashboardHome() {
               ) : null}
 
               <div className="row g-3 mb-3">
-                <div className="col-md-4">
+                <div className={incomeCapHud.hasReferralPath ? 'col-md-4' : 'col-md-6'}>
                   <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
                     <div className="small" style={{ color: '#aaa' }}>
-                      All packages — daily profit
+                      Daily ROI (upto 2×)
                     </div>
                     <div className="fw-semibold text-light">
                       $ {fmt(incomeCapHud.roiPaid)} / $ {fmt(incomeCapHud.roiCap)}
                     </div>
                     <div className="small mt-1" style={{ color: incomeCapHud.roiStopped ? '#e8a0a0' : '#8dcea0' }}>
                       {incomeCapHud.roiStopped
-                        ? 'Stopped'
-                        : `About $ ${fmt(incomeCapHud.roiRemaining)} left`}
+                        ? '2× finished — package inactive'
+                        : `Remaining $ ${fmt(incomeCapHud.roiRemaining)}`}
                     </div>
                   </div>
                 </div>
-                <div className="col-md-4">
-                  <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                    <div className="small" style={{ color: '#aaa' }}>
-                      Sponsor + team + rank (shared until 3×)
-                    </div>
-                    <div className="fw-semibold text-light">
-                      $ {fmt(incomeCapHud.workingPaid)} / $ {fmt(incomeCapHud.workingCap)}
-                    </div>
-                    <div className="small mt-1" style={{ color: incomeCapHud.workingStopped ? '#e8a0a0' : '#8dcea0' }}>
-                      {incomeCapHud.workingStopped
-                        ? 'Stopped — 3× reached'
-                        : `About $ ${fmt(incomeCapHud.workingRemaining)} left to 3×`}
-                    </div>
-                  </div>
-                </div>
-                <div className="col-md-4">
-                  <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                    <div className="small" style={{ color: '#aaa' }}>
-                      Combined total vs 3×
-                    </div>
-                    <div className="fw-semibold text-light">
-                      $ {fmt(incomeCapHud.totalPaid)} / $ {fmt(incomeCapHud.totalCap)}
-                    </div>
-                    <div className="small mt-1" style={{ color: incomeCapHud.allStopped ? '#e8a0a0' : '#8dcea0' }}>
-                      {incomeCapHud.allStopped
-                        ? 'Limit reached'
-                        : `About $ ${fmt(incomeCapHud.totalRemaining)} left`}
+                {incomeCapHud.hasReferralPath ? (
+                  <div className="col-md-4">
+                    <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                      <div className="small" style={{ color: '#aaa' }}>
+                        Referral + other (extra upto 1×)
+                      </div>
+                      <div className="fw-semibold text-light">
+                        $ {fmt(incomeCapHud.workingPaid)} / $ {fmt(incomeCapHud.workingSoftCap)}
+                      </div>
+                      <div
+                        className="small mt-1"
+                        style={{
+                          color: incomeCapHud.referralExtraRemaining > 0 ? '#8dcea0' : '#e8a0a0',
+                        }}
+                      >
+                        Remaining extra 1×: $ {fmt(incomeCapHud.referralExtraRemaining)}
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div className="col-md-6">
+                    <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                      <div className="small" style={{ color: '#aaa' }}>
+                        Unlock +1× more
+                      </div>
+                      <div className="fw-semibold text-light">
+                        Refer members for up to $ {fmt(incomeCapHud.workingSoftCap)}
+                      </div>
+                      <div className="small mt-1" style={{ color: '#8dcea0' }}>
+                        Then combined max becomes $ {fmt(incomeCapHud.totalCap)} (3×)
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {incomeCapHud.hasReferralPath ? (
+                  <div className="col-md-4">
+                    <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                      <div className="small" style={{ color: '#aaa' }}>
+                        Combined total vs 3×
+                      </div>
+                      <div className="fw-semibold text-light">
+                        $ {fmt(incomeCapHud.totalPaid)} / $ {fmt(incomeCapHud.totalCap)}
+                      </div>
+                      <div className="small mt-1" style={{ color: incomeCapHud.allStopped ? '#e8a0a0' : '#8dcea0' }}>
+                        {incomeCapHud.allStopped
+                          ? '3× reached — package inactive'
+                          : `Remaining total $ ${fmt(incomeCapHud.totalRemaining)}`}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div

@@ -602,6 +602,7 @@ async function paySponsorBonusForActivation(
       createdAt: FieldValue.serverTimestamp(),
     })
     sponsorPaid = payAmt
+    await maybeCompleteActivePackagesWhenTotalCapReached(sponsorUid)
   }
 
   await db
@@ -862,6 +863,7 @@ async function distributeTeamLevelIncomeFromDailyRoi(
               ...(row.conditionDescription ? { conditionDescription: row.conditionDescription } : {}),
               createdAt: FieldValue.serverTimestamp(),
             })
+            await maybeCompleteActivePackagesWhenTotalCapReached(upl)
           }
         }
       }
@@ -993,6 +995,30 @@ async function bumpSponsorActiveDirectWhenDirectGainsFirstActivePackage(memberUi
     .collection(COL_USERS)
     .doc(sponsor)
     .set({ activeDirects: FieldValue.increment(1), updatedAt: Date.now() }, { merge: true })
+}
+
+/** When total 3× room is exhausted, mark all active packages completed (inactive). */
+async function maybeCompleteActivePackagesWhenTotalCapReached(uid: string) {
+  const room = await userTotalIncomeRemaining(uid)
+  if (room > 1e-9) return
+  const snap = await db
+    .collection(COL_ACTIVE)
+    .where('userId', '==', uid)
+    .where('status', '==', 'active')
+    .get()
+  if (snap.empty) return
+  const now = Timestamp.now()
+  for (const d of snap.docs) {
+    await d.ref.set(
+      {
+        status: 'completed',
+        completedReason: 'total_income_3x',
+        updatedAt: now,
+      },
+      { merge: true },
+    )
+  }
+  await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(uid)
 }
 
 /** When a member drops to zero active packages, decrement sponsor once (non-negative). */
@@ -1826,6 +1852,19 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
         )
       }
     }
+  }
+
+  const existingActive = await db
+    .collection(COL_ACTIVE)
+    .where('userId', '==', beneficiaryUid)
+    .where('status', '==', 'active')
+    .limit(1)
+    .get()
+  if (!existingActive.empty) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Only one active package is allowed. Wait until the current package becomes inactive, then activate again.',
+    )
   }
 
   const pkgSnap = await db.collection(COL_PACKAGES).doc(packageId).get()
@@ -3838,7 +3877,10 @@ export const processDailyRoi = onSchedule(
     const endsAt = ap.endsAt as Timestamp
     const userIdEarly = String(ap.userId ?? '')
     if (endsAt.toMillis() < now.toMillis()) {
-      await docSnap.ref.set({ status: 'completed', updatedAt: now }, { merge: true })
+      await docSnap.ref.set(
+        { status: 'completed', completedReason: 'plan_ended', updatedAt: now },
+        { merge: true },
+      )
       if (userIdEarly) await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(userIdEarly)
       continue
     }
@@ -3860,10 +3902,6 @@ export const processDailyRoi = onSchedule(
     const planSnap = effectivePlanSnapshotForActivePackage(ap, userData)
 
     const totalIncomeRoom = await userTotalIncomeRemaining(userId)
-    if (totalIncomeRoom <= 1e-9) {
-      continue
-    }
-
     const roiPercent = Number(
       planSnap.roiPercent != null ? planSnap.roiPercent : ap.roiPercent ?? 0,
     )
@@ -3875,8 +3913,19 @@ export const processDailyRoi = onSchedule(
     )
     const cap = amount * Math.max(nwMult, 0)
     const headroom = Math.max(0, cap - nonWorkingPaid)
-    /** NW bucket full — stay `active` so sponsor/team income can continue until total 3× is hit. */
-    if (headroom <= 1e-12) {
+
+    /** Daily 2× full or total 3× full → package inactive automatically. */
+    if (headroom <= 1e-12 || totalIncomeRoom <= 1e-9) {
+      await docSnap.ref.set(
+        {
+          status: 'completed',
+          nonWorkingRoiSaturated: headroom <= 1e-12 ? true : ap.nonWorkingRoiSaturated === true,
+          completedReason: headroom <= 1e-12 ? 'daily_roi_2x' : 'total_income_3x',
+          updatedAt: now,
+        },
+        { merge: true },
+      )
+      if (userId) await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(userId)
       continue
     }
 
@@ -3891,10 +3940,16 @@ export const processDailyRoi = onSchedule(
 
     const newPaid = nonWorkingPaid + daily
     const hitCap = newPaid >= cap - 1e-9
+    const roomAfter = totalIncomeRoom - daily
+    const completeNow = hitCap || roomAfter <= 1e-9
     const patch: Record<string, unknown> = { nonWorkingPaid: newPaid, updatedAt: now }
     if (compound) patch.compoundingBalance = bal + daily
     if (hitCap) {
       patch.nonWorkingRoiSaturated = true
+    }
+    if (completeNow) {
+      patch.status = 'completed'
+      patch.completedReason = hitCap ? 'daily_roi_2x' : 'total_income_3x'
     }
     await docSnap.ref.update(patch)
     await db.collection(COL_USERS).doc(userId).update({
@@ -3922,6 +3977,9 @@ export const processDailyRoi = onSchedule(
       offWeekdays: normalizeRoiOffWeekdays(settings.roiOffWeekdays),
       offDates: normalizeRoiOffDates(settings.roiOffDates),
     })
+    if (completeNow) {
+      await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(userId)
+    }
     alreadyCredited.add(docSnap.id)
   }
 
