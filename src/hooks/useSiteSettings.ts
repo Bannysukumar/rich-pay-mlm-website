@@ -38,7 +38,7 @@ const defaults: SiteSettings = {
   rankQualificationRestPercent: 50,
   roiEnabled: true,
   roiOffDates: [],
-  roiOffWeekdays: [0],
+  roiOffWeekdays: [0, 6],
   roiProcessHourUtc: 0,
   packageTopupActivationPercent: 50,
   packageTopupDepositPercent: 50,
@@ -158,7 +158,7 @@ export function useSiteSettings() {
             : defaults.roiOffDates ?? [],
           roiOffWeekdays: Array.isArray(d.roiOffWeekdays)
             ? d.roiOffWeekdays.map((x) => Number(x)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
-            : defaults.roiOffWeekdays ?? [0],
+            : defaults.roiOffWeekdays ?? [0, 6],
           roiProcessHourUtc: Number(d.roiProcessHourUtc ?? defaults.roiProcessHourUtc ?? 0),
           packageTopupActivationPercent: Number(
             d.packageTopupActivationPercent ?? defaults.packageTopupActivationPercent ?? 50,

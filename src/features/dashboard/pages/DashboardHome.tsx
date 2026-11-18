@@ -30,6 +30,14 @@ import {
   referralWhatsappShareFromSettings,
 } from '@/lib/referralShareMessage'
 import { deriveIncomeCapHud, type ActiveStakeForCap } from '@/lib/incomeCapHud'
+import {
+  estimateRoi2xCompleteIstDay,
+  formatRoi2xCompleteLabel,
+  formatRoiOffWeekdaysShort,
+  normalizeRoiOffDates,
+  normalizeRoiOffWeekdays,
+  ROI_JOB_TIME_LABEL_IST,
+} from '@/lib/istCalendar'
 
 function fmt(n: number) {
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })
@@ -53,6 +61,8 @@ type PkgIncomeRow = {
   wMult: number
   packageName: string
   startedAtMs: number
+  /** Frozen daily ROI % from plan snapshot (e.g. 1). */
+  roiPercent: number
 }
 
 function normalizePowerRest(pRaw: number, rRaw: number): { p: number; r: number } {
@@ -224,6 +234,7 @@ export function DashboardHome() {
             wMult: Number.isFinite(wMult) && wMult >= 0 ? wMult : siteW,
             packageName: String(ps?.packageName ?? d.packageName ?? 'Package'),
             startedAtMs,
+            roiPercent: Number(ps?.roiPercent != null ? ps.roiPercent : d.roiPercent ?? 0),
           })
         })
         setActivePackageTotal(sum)
@@ -306,18 +317,30 @@ export function DashboardHome() {
     profile?.rankCommissionTotal,
   ])
 
+  const roiOffWeekdays = useMemo(
+    () => normalizeRoiOffWeekdays(settings.roiOffWeekdays),
+    [settings.roiOffWeekdays],
+  )
+  const roiOffDates = useMemo(
+    () => normalizeRoiOffDates(settings.roiOffDates),
+    [settings.roiOffDates],
+  )
+  const roiOffShort = useMemo(() => formatRoiOffWeekdaysShort(roiOffWeekdays), [roiOffWeekdays])
+
   /** Per-package lines so members see each investment separately (not only the combined total). */
   const perPackageCapRows = useMemo(() => {
     return pkgIncomeRows
       .filter((p) => p.liveActive)
       .slice()
-      .sort((a, b) => b.startedAtMs - a.startedAtMs)
+      .sort((a, b) => a.startedAtMs - b.startedAtMs)
       .map((p, idx, arr) => {
         const amt = Math.max(0, p.amount)
         const roiCap = amt * Math.max(0, p.nwMult)
         const pkgCap = amt * (Math.max(0, p.nwMult) + Math.max(0, p.wMult))
         const roiPaid = Math.max(0, p.nonWorkingPaid)
         const roiLeft = Math.max(0, roiCap - roiPaid)
+        const dailyPay = Math.round(((amt * Math.max(0, p.roiPercent)) / 100) * 100) / 100
+        const completeDay = estimateRoi2xCompleteIstDay(roiLeft, dailyPay, roiOffWeekdays, roiOffDates)
         const startedLabel = p.startedAtMs
           ? new Date(p.startedAtMs).toLocaleDateString(undefined, {
               day: '2-digit',
@@ -327,18 +350,21 @@ export function DashboardHome() {
           : '—'
         return {
           id: p.id,
-          title: arr.length > 1 ? `Package ${arr.length - idx}` : p.packageName || 'Package',
+          title: arr.length > 1 ? `Package ${idx + 1}` : p.packageName || 'Package',
           packageName: p.packageName,
           startedLabel,
           amount: amt,
           roiPaid,
           roiCap,
           roiLeft,
+          dailyPay,
           pkgCap,
           roiPct: roiCap > 1e-9 ? Math.min(100, Math.round((roiPaid / roiCap) * 1000) / 10) : 0,
+          twoXCompleteLabel:
+            roiLeft <= 1e-9 ? '2× already reached' : formatRoi2xCompleteLabel(completeDay),
         }
       })
-  }, [pkgIncomeRows])
+  }, [pkgIncomeRows, roiOffWeekdays, roiOffDates])
 
   const activePackagesSub =
     perPackageCapRows.length > 1
@@ -663,8 +689,22 @@ export function DashboardHome() {
 
               {perPackageCapRows.length > 0 ? (
                 <div className="mb-3">
-                  <div className="small mb-2" style={{ color: '#aaa', fontWeight: 600 }}>
-                    Each package separately ({perPackageCapRows.length})
+                  <div className="d-flex flex-wrap justify-content-between align-items-end gap-2 mb-2">
+                    <div>
+                      <div className="small mb-1" style={{ color: '#aaa', fontWeight: 600 }}>
+                        Daily ROI ({roiOffShort})
+                      </div>
+                      <div className="small" style={{ color: '#ccc' }}>
+                        Total: earned <strong className="text-light">$ {fmt(incomeCapHud.roiPaid)}</strong>
+                        {' · '}
+                        remaining <strong className="text-light">$ {fmt(Math.max(0, incomeCapHud.roiCap - incomeCapHud.roiPaid))}</strong>
+                        {' · '}
+                        max 2× <strong className="text-light">$ {fmt(incomeCapHud.roiCap)}</strong>
+                      </div>
+                    </div>
+                    <div className="small" style={{ color: '#888' }}>
+                      Pays {ROI_JOB_TIME_LABEL_IST} · Mon–Fri
+                    </div>
                   </div>
                   <div className="row g-2">
                     {perPackageCapRows.map((pkg) => (
@@ -678,18 +718,17 @@ export function DashboardHome() {
                         >
                           <div className="d-flex flex-wrap justify-content-between gap-2 mb-2">
                             <div>
-                              <strong className="text-light d-block">{pkg.title}</strong>
+                              <strong className="text-light d-block">
+                                {pkg.packageName || pkg.title} · $ {fmt(pkg.amount)}
+                              </strong>
                               <span className="small" style={{ color: '#888' }}>
-                                {pkg.packageName && pkg.packageName !== pkg.title
-                                  ? `${pkg.packageName} · `
-                                  : ''}
                                 Started {pkg.startedLabel}
                               </span>
                             </div>
-                            <div className="text-end">
-                              <div style={{ color: '#d4af37', fontWeight: 700 }}>$ {fmt(pkg.amount)}</div>
-                              <div className="small" style={{ color: '#888' }}>
-                                this package
+                            <div className="text-end small">
+                              <div style={{ color: '#d4af37', fontWeight: 600 }}>2× complete</div>
+                              <div style={{ color: pkg.roiLeft > 0 ? '#8dcea0' : '#e8a0a0' }}>
+                                {pkg.twoXCompleteLabel}
                               </div>
                             </div>
                           </div>
@@ -711,10 +750,10 @@ export function DashboardHome() {
                           </div>
                           <div className="d-flex flex-wrap justify-content-between gap-2 small">
                             <span style={{ color: '#ccc' }}>
-                              Daily earned $ {fmt(pkg.roiPaid)} / $ {fmt(pkg.roiCap)} (2×)
+                              Earned $ {fmt(pkg.roiPaid)} / $ {fmt(pkg.roiCap)} (2×)
                             </span>
                             <span style={{ color: pkg.roiLeft > 0 ? '#8dcea0' : '#e8a0a0', fontWeight: 600 }}>
-                              $ {fmt(pkg.roiLeft)} left on this package
+                              $ {fmt(pkg.roiLeft)} remaining
                             </span>
                           </div>
                         </div>
@@ -727,7 +766,7 @@ export function DashboardHome() {
                     </p>
                   ) : (
                     <p className="small mt-2 mb-0" style={{ color: '#888' }}>
-                      Referral +1× is shared across your account (not per package). Daily 2× is tracked separately on each package.
+                      Referral +1× is shared across your account. 2× date assumes daily ROI only (extra referral income can finish packages sooner at 3×).
                     </p>
                   )}
                 </div>

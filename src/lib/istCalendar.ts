@@ -15,8 +15,74 @@ export function istWeekdayLong(when = new Date()): string {
   return new Intl.DateTimeFormat('en-US', { timeZone: ROI_CALENDAR_TZ, weekday: 'long' }).format(when)
 }
 
-/** Default: no ROI / team level on Sunday (IST). */
-export const DEFAULT_ROI_OFF_WEEKDAYS: number[] = [0]
+/** Default: no ROI / team level on Saturday + Sunday (IST). */
+export const DEFAULT_ROI_OFF_WEEKDAYS: number[] = [0, 6]
+
+/** Nightly ROI cron time label (matches `processDailyRoi` schedule). */
+export const ROI_JOB_TIME_LABEL_IST = '12:00 AM IST'
+
+/**
+ * Estimate the IST calendar day when remaining daily ROI (2×) will finish.
+ * Counts Mon–Fri paying days (or whatever `offWeekdays` allows), $dailyPay each.
+ * Returns `YYYY-MM-DD` or null if already complete / invalid.
+ */
+export function estimateRoi2xCompleteIstDay(
+  roiRemaining: number,
+  dailyPay: number,
+  offWeekdays: number[] = DEFAULT_ROI_OFF_WEEKDAYS,
+  offDates: string[] = [],
+  fromWhen = new Date(),
+): string | null {
+  const left0 = Math.max(0, Number(roiRemaining) || 0)
+  const pay = Math.max(0, Number(dailyPay) || 0)
+  if (left0 <= 1e-9) return null
+  if (pay <= 1e-9) return null
+  const offWd = new Set(normalizeRoiOffWeekdays(offWeekdays))
+  const offDay = new Set(normalizeRoiOffDates(offDates))
+  let need = left0
+  // Start from tomorrow IST calendar day (tonight's job already credited "today" or will).
+  let cursor = new Date(fromWhen.getTime() + 86400000)
+  for (let guard = 0; guard < 4000; guard++) {
+    const key = istDayKey(cursor)
+    const wd = istWeekdayIndex(cursor)
+    if (!offWd.has(wd) && !offDay.has(key)) {
+      need -= pay
+      if (need <= 1e-9) return key
+    }
+    cursor = new Date(cursor.getTime() + 86400000)
+  }
+  return null
+}
+
+/** Format `YYYY-MM-DD` IST day for member UI, e.g. `26 Apr 2027, 12:00 AM IST`. */
+export function formatRoi2xCompleteLabel(istDayKeyStr: string | null): string {
+  if (!istDayKeyStr) return '—'
+  const [y, m, d] = istDayKeyStr.split('-').map(Number)
+  if (!y || !m || !d) return istDayKeyStr
+  const label = new Date(Date.UTC(y, m - 1, d, 6, 0, 0)).toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+  return `${label}, ${ROI_JOB_TIME_LABEL_IST}`
+}
+
+/** Short label for which weekdays are off, e.g. "Sat+Sun off". */
+export function formatRoiOffWeekdaysShort(offWeekdays: number[] = DEFAULT_ROI_OFF_WEEKDAYS): string {
+  const set = new Set(normalizeRoiOffWeekdays(offWeekdays))
+  const labels: string[] = []
+  if (set.has(6)) labels.push('Sat')
+  if (set.has(0)) labels.push('Sun')
+  for (const o of ROI_WEEKDAY_OPTIONS) {
+    if ((o.value === 0 || o.value === 6) && set.has(o.value)) continue
+    if (set.has(o.value)) labels.push(o.label.slice(0, 3))
+  }
+  if (labels.length === 0) return 'no weekly off days'
+  if (labels.length === 1) return `${labels[0]} off`
+  if (labels.length === 2) return `${labels[0]}+${labels[1]} off`
+  return `${labels.join('+')} off`
+}
 
 export const ROI_WEEKDAY_OPTIONS: { value: number; label: string }[] = [
   { value: 0, label: 'Sunday' },
