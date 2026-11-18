@@ -63,6 +63,8 @@ type PkgIncomeRow = {
   startedAtMs: number
   /** Frozen daily ROI % from plan snapshot (e.g. 1). */
   roiPercent: number
+  /** Referral/working income attributed to this earner package. */
+  attributedWorkingIncome: number
 }
 
 function normalizePowerRest(pRaw: number, rRaw: number): { p: number; r: number } {
@@ -235,6 +237,7 @@ export function DashboardHome() {
             packageName: String(ps?.packageName ?? d.packageName ?? 'Package'),
             startedAtMs,
             roiPercent: Number(ps?.roiPercent != null ? ps.roiPercent : d.roiPercent ?? 0),
+            attributedWorkingIncome: Number(d.attributedWorkingIncome ?? 0),
           })
         })
         setActivePackageTotal(sum)
@@ -300,6 +303,9 @@ export function DashboardHome() {
       nwMult: p.nwMult,
       wMult: p.wMult,
       packageName: p.packageName,
+      startedAtMs: p.startedAtMs,
+      attributedWorkingIncome: p.attributedWorkingIncome,
+      id: p.id,
     }))
     const hasReferralPath =
       Number(profile?.activeDirects ?? 0) > 0 ||
@@ -674,13 +680,14 @@ export function DashboardHome() {
                   <div className="col-sm-6">
                     <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
                       <div className="small mb-1" style={{ color: '#aaa' }}>
-                        Referral income left (1×)
+                        Referral left on first package (1×)
                       </div>
                       <div className="fw-semibold text-light" style={{ fontSize: '1.1rem' }}>
                         $ {fmt(incomeCapHud.referralExtraRemaining)}
                       </div>
                       <div className="small mt-1" style={{ color: '#888' }}>
-                        extra up to $ {fmt(incomeCapHud.workingSoftCap)} · total max 3×
+                        {incomeCapHud.firstPackageLabel} · $ {fmt(incomeCapHud.firstPackageAmount)} · up
+                        to $ {fmt(incomeCapHud.workingSoftCap)}
                       </div>
                     </div>
                   </div>
@@ -762,11 +769,13 @@ export function DashboardHome() {
                   </div>
                   {!incomeCapHud.hasReferralPath ? (
                     <p className="small mt-2 mb-0" style={{ color: '#888' }}>
-                      No referral income yet — max shown is 2× daily only. Refer members to unlock +1× (total 3×).
+                      No referral income yet — each package shows daily 2× only. Referral income will count on your
+                      oldest package only.
                     </p>
                   ) : (
                     <p className="small mt-2 mb-0" style={{ color: '#888' }}>
-                      Referral +1× is shared across your account. 2× date assumes daily ROI only (extra referral income can finish packages sooner at 3×).
+                      Referral counts only on your oldest active package. When that package’s 3× is full it closes;
+                      other packages keep daily ROI to their own 2×.
                     </p>
                   )}
                 </div>

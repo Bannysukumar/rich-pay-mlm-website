@@ -4,6 +4,7 @@ import {
   FieldPath,
   FieldValue,
   Timestamp,
+  type DocumentReference,
   type DocumentSnapshot,
   type QueryDocumentSnapshot,
 } from 'firebase-admin/firestore'
@@ -288,53 +289,136 @@ function workingIncomeCreditedTotal(ud: Record<string, unknown> | undefined): nu
   )
 }
 
-/**
- * Room left for sponsor / team level / rank. These keep paying past any 1× working
- * snapshot until the member’s combined 3× total income ceiling is full.
- */
-async function userWorkingIncomeRemaining(uid: string): Promise<number> {
-  return userTotalIncomeRemaining(uid)
+function activePackageCapMultipliers(x: Record<string, unknown>): { amount: number; nw: number; w: number } {
+  const amt = Math.max(0, Number(x.amount ?? 0))
+  const ps = x.planSnapshot as Record<string, unknown> | undefined
+  const nw = Number(
+    x.frozenNonWorkingCapMultiplier ??
+      (ps != null && ps.nonWorkingIncomeCapMultiplier != null ? Number(ps.nonWorkingIncomeCapMultiplier) : undefined) ??
+      2,
+  )
+  const w = Number(
+    x.frozenWorkingCapMultiplier ??
+      (ps != null && ps.workingIncomeCapMultiplier != null ? Number(ps.workingIncomeCapMultiplier) : undefined) ??
+      1,
+  )
+  return { amount: amt, nw: Math.max(0, nw), w: Math.max(0, w) }
 }
 
-/**
- * Combined ceiling: Σ stake × (non-working mult + working mult) over active packages, minus
- * ROI already paid on those packages and lifetime working income. All income stops at 0.
- */
-async function userTotalIncomeRemaining(uid: string): Promise<number> {
-  const snap = await db.collection(COL_ACTIVE).where('userId', '==', uid).where('status', '==', 'active').get()
-  let ceiling = 0
-  let roiPaid = 0
-  for (const d of snap.docs) {
-    const x = d.data()
-    const amt = Number(x.amount ?? 0)
-    const ps = x.planSnapshot as Record<string, unknown> | undefined
-    const nw = Number(
-      x.frozenNonWorkingCapMultiplier ??
-        (ps != null && ps.nonWorkingIncomeCapMultiplier != null ? Number(ps.nonWorkingIncomeCapMultiplier) : undefined) ??
-        2,
-    )
-    const w = Number(
-      x.frozenWorkingCapMultiplier ??
-        (ps != null && ps.workingIncomeCapMultiplier != null ? Number(ps.workingIncomeCapMultiplier) : undefined) ??
-        3,
-    )
-    ceiling += amt * (Math.max(0, nw) + Math.max(0, w))
-    roiPaid += Number(x.nonWorkingPaid ?? 0)
-  }
-  const us = await db.collection(COL_USERS).doc(uid).get()
-  const working = workingIncomeCreditedTotal(us.data() as Record<string, unknown> | undefined)
+/** Referral/working income attributed to this earner package (not income generated for uplines). */
+function packageAttributedWorkingIncome(x: Record<string, unknown>): number {
+  return Math.max(0, Number(x.attributedWorkingIncome ?? 0))
+}
+
+/** This package’s own 3× room: amount×(2×+1×) − ROI paid − attributed referral on THIS package. */
+function packageIncomeRemainingFromData(x: Record<string, unknown>): number {
+  const { amount, nw, w } = activePackageCapMultipliers(x)
+  const ceiling = amount * (nw + w)
+  const roiPaid = Math.max(0, Number(x.nonWorkingPaid ?? 0))
+  const working = packageAttributedWorkingIncome(x)
   return Math.max(0, ceiling - roiPaid - working)
 }
 
-/** Block rank drip when user exhausted working cap and at least one active package has stop-all snapshot. */
+function startedAtMillis(x: Record<string, unknown>): number {
+  const s = x.startedAt as { toMillis?: () => number } | number | undefined
+  if (s && typeof (s as { toMillis?: () => number }).toMillis === 'function') {
+    return (s as { toMillis: () => number }).toMillis()
+  }
+  return Number(s ?? 0) || 0
+}
+
+/** Oldest active package (first package) — referral income attaches here only. */
+async function getOldestActivePackage(uid: string): Promise<QueryDocumentSnapshot | null> {
+  const snap = await db.collection(COL_ACTIVE).where('userId', '==', uid).where('status', '==', 'active').get()
+  if (snap.empty) return null
+  const sorted = snap.docs.slice().sort((a, b) => startedAtMillis(a.data()) - startedAtMillis(b.data()))
+  return sorted[0] ?? null
+}
+
+/**
+ * Room left for sponsor / team level / rank on the earner’s oldest active package only.
+ * Other packages are not reduced by this referral income.
+ */
+async function userWorkingIncomeRemaining(uid: string): Promise<number> {
+  const oldest = await getOldestActivePackage(uid)
+  if (!oldest) return 0
+  return packageIncomeRemainingFromData(oldest.data())
+}
+
+/**
+ * Room left on a specific package for any further income (ROI + attributed referral).
+ * Used by daily ROI so sibling packages are not blocked by another package’s referral fill.
+ */
+function packageTotalIncomeRemaining(x: Record<string, unknown>): number {
+  return packageIncomeRemainingFromData(x)
+}
+
+/** @deprecated account-wide 3× — kept as alias to oldest-package room for any leftover callers. */
+async function userTotalIncomeRemaining(uid: string): Promise<number> {
+  return userWorkingIncomeRemaining(uid)
+}
+
+async function maybeCompletePackageIfIncomeCapReached(
+  pkgRef: DocumentReference,
+  pkgData: Record<string, unknown>,
+) {
+  if (packageIncomeRemainingFromData(pkgData) > 1e-9) return false
+  const now = Timestamp.now()
+  await pkgRef.set(
+    {
+      status: 'completed',
+      completedReason: 'package_income_3x',
+      updatedAt: now,
+    },
+    { merge: true },
+  )
+  const owner = String(pkgData.userId ?? '')
+  if (owner) await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(owner)
+  return true
+}
+
+/**
+ * Credit working/referral income onto the earner’s oldest active package; close only that package if full.
+ * Returns the amount actually credited (may be less than requested).
+ */
+async function attributeWorkingIncomeToOldestPackage(
+  earnerUid: string,
+  amount: number,
+): Promise<{ paid: number; packageId: string | null }> {
+  const payReq = Math.max(0, Number(amount) || 0)
+  if (payReq <= 1e-12) return { paid: 0, packageId: null }
+  const oldest = await getOldestActivePackage(earnerUid)
+  if (!oldest) return { paid: 0, packageId: null }
+  const data = oldest.data()
+  const room = packageIncomeRemainingFromData(data)
+  const paid = Math.min(payReq, room)
+  if (paid <= 1e-12) {
+    await maybeCompletePackageIfIncomeCapReached(oldest.ref, data)
+    return { paid: 0, packageId: oldest.id }
+  }
+  await oldest.ref.set(
+    {
+      attributedWorkingIncome: FieldValue.increment(paid),
+      updatedAt: Date.now(),
+    },
+    { merge: true },
+  )
+  const nextData = {
+    ...data,
+    attributedWorkingIncome: packageAttributedWorkingIncome(data) + paid,
+  }
+  await maybeCompletePackageIfIncomeCapReached(oldest.ref, nextData)
+  return { paid, packageId: oldest.id }
+}
+
+/** Block rank drip when oldest-package working/3× room is empty and stop-all snapshot is set. */
 async function shouldBlockRankPayoutForWorkingCap(uid: string): Promise<boolean> {
   const rem = await userWorkingIncomeRemaining(uid)
   if (rem > 1e-9) return false
-  const snap = await db.collection(COL_ACTIVE).where('userId', '==', uid).where('status', '==', 'active').get()
-  for (const d of snap.docs) {
-    const ps = d.data()?.planSnapshot as Record<string, unknown> | undefined
-    if (ps && ps.stopAllIncomeWhenWorkingCapReached === true) return true
-  }
+  const oldest = await getOldestActivePackage(uid)
+  if (!oldest) return true
+  const ps = oldest.data()?.planSnapshot as Record<string, unknown> | undefined
+  if (ps && ps.stopAllIncomeWhenWorkingCapReached === true) return true
   return false
 }
 
@@ -584,8 +668,10 @@ async function paySponsorBonusForActivation(
   }
 
   const gross = (activationAmount * sponsorPct) / 100
-  const remaining = await userWorkingIncomeRemaining(sponsorUid)
-  const payAmt = Math.min(gross, Math.max(0, remaining))
+  const { paid: payAmt, packageId: earnerPackageId } = await attributeWorkingIncomeToOldestPackage(
+    sponsorUid,
+    gross,
+  )
   if (payAmt > 1e-12) {
     await sRef.update({
       'wallets.cash': FieldValue.increment(payAmt),
@@ -599,10 +685,10 @@ async function paySponsorBonusForActivation(
       fromUserId: beneficiaryUid,
       amount: payAmt,
       activePackageId,
+      earnerActivePackageId: earnerPackageId,
       createdAt: FieldValue.serverTimestamp(),
     })
     sponsorPaid = payAmt
-    await maybeCompleteActivePackagesWhenTotalCapReached(sponsorUid)
   }
 
   await db
@@ -814,8 +900,10 @@ async function distributeTeamLevelIncomeFromDailyRoi(
         const directs = Number(uplSnap.data()?.activeDirects ?? 0)
         if (directs >= row.requiredDirects) {
           const gross = (dailyRoiCredited * row.percent) / 100
-          const remaining = await userWorkingIncomeRemaining(upl)
-          const payAmt = Math.min(gross, Math.max(0, remaining))
+          const { paid: payAmt, packageId: earnerPackageId } = await attributeWorkingIncomeToOldestPackage(
+            upl,
+            gross,
+          )
           if (payAmt > 1e-12) {
             const { capPct, maxPayDays } = teamLevelWindowCapMaxPayDays(row, payoutClock.durationDays)
             const durSnap = Math.max(0, Math.floor(payoutClock.durationDays))
@@ -851,6 +939,7 @@ async function distributeTeamLevelIncomeFromDailyRoi(
               level: row.level,
               amount: payAmt,
               activePackageId: downlineActivePackageId,
+              earnerActivePackageId: earnerPackageId,
               downlinePackageAmount: Number(planSnap.packageAmount ?? planSnap.activationAmount ?? 0),
               sourceDailyRoi: dailyRoiCredited,
               distribution: 'daily_roi_share',
@@ -863,7 +952,6 @@ async function distributeTeamLevelIncomeFromDailyRoi(
               ...(row.conditionDescription ? { conditionDescription: row.conditionDescription } : {}),
               createdAt: FieldValue.serverTimestamp(),
             })
-            await maybeCompleteActivePackagesWhenTotalCapReached(upl)
           }
         }
       }
@@ -998,27 +1086,11 @@ async function bumpSponsorActiveDirectWhenDirectGainsFirstActivePackage(memberUi
 }
 
 /** When total 3× room is exhausted, mark all active packages completed (inactive). */
+/** Complete only the oldest active package when its own 3× (ROI + attributed referral) is full. */
 async function maybeCompleteActivePackagesWhenTotalCapReached(uid: string) {
-  const room = await userTotalIncomeRemaining(uid)
-  if (room > 1e-9) return
-  const snap = await db
-    .collection(COL_ACTIVE)
-    .where('userId', '==', uid)
-    .where('status', '==', 'active')
-    .get()
-  if (snap.empty) return
-  const now = Timestamp.now()
-  for (const d of snap.docs) {
-    await d.ref.set(
-      {
-        status: 'completed',
-        completedReason: 'total_income_3x',
-        updatedAt: now,
-      },
-      { merge: true },
-    )
-  }
-  await maybeDecrementSponsorActiveDirectsWhenNoActivePackages(uid)
+  const oldest = await getOldestActivePackage(uid)
+  if (!oldest) return
+  await maybeCompletePackageIfIncomeCapReached(oldest.ref, oldest.data())
 }
 
 /** When a member drops to zero active packages, decrement sponsor once (non-negative). */
@@ -1094,16 +1166,18 @@ async function processRankRewardForUser(uid: string, dayKey: string) {
       return
     }
 
-    const workingRem = await userWorkingIncomeRemaining(uid)
-    const payAmt = Math.min(daily, Math.max(0, workingRem))
-    if (payAmt <= 1e-12) {
-      return
-    }
-
     const nextDay = daysPaid + 1
     const bonusId = `${uid}_${dayKey}_${rankId}_d${nextDay}`
     const existed = await db.collection('rankBonuses').doc(bonusId).get()
     if (existed.exists) return
+
+    const { paid: payAmt, packageId: earnerPackageId } = await attributeWorkingIncomeToOldestPackage(
+      uid,
+      daily,
+    )
+    if (payAmt <= 1e-12) {
+      return
+    }
 
     await db.collection('rankBonuses').doc(bonusId).set({
       userId: uid,
@@ -1115,6 +1189,7 @@ async function processRankRewardForUser(uid: string, dayKey: string) {
       payoutDaysTotal: totalDays,
       scheduledPayout: true,
       transactionType: 'Ranking Bonus',
+      earnerActivePackageId: earnerPackageId,
       createdAt: FieldValue.serverTimestamp(),
     })
 
@@ -2001,6 +2076,7 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
       nonWorkingPaid: 0,
       workingPaid: 0,
       workingIncomeEarned: 0,
+      attributedWorkingIncome: 0,
       status: 'active',
       planType: planLabel,
       purchasedByUid: uid,
@@ -3888,7 +3964,8 @@ export const processDailyRoi = onSchedule(
     const userData = userRow.data() as Record<string, unknown>
     const planSnap = effectivePlanSnapshotForActivePackage(ap, userData)
 
-    const totalIncomeRoom = await userTotalIncomeRemaining(userId)
+    /** Per-package room only (ROI + attributed referral on THIS package — not whole-account). */
+    const packageRoom = packageTotalIncomeRemaining(ap as Record<string, unknown>)
     const roiPercent = Number(
       planSnap.roiPercent != null ? planSnap.roiPercent : ap.roiPercent ?? 0,
     )
@@ -3901,13 +3978,13 @@ export const processDailyRoi = onSchedule(
     const cap = amount * Math.max(nwMult, 0)
     const headroom = Math.max(0, cap - nonWorkingPaid)
 
-    /** Daily 2× full or total 3× full → package inactive automatically. */
-    if (headroom <= 1e-12 || totalIncomeRoom <= 1e-9) {
+    /** Daily 2× full or this package’s own 3× full → this package inactive automatically. */
+    if (headroom <= 1e-12 || packageRoom <= 1e-9) {
       await docSnap.ref.set(
         {
           status: 'completed',
           nonWorkingRoiSaturated: headroom <= 1e-12 ? true : ap.nonWorkingRoiSaturated === true,
-          completedReason: headroom <= 1e-12 ? 'daily_roi_2x' : 'total_income_3x',
+          completedReason: headroom <= 1e-12 ? 'daily_roi_2x' : 'package_income_3x',
           updatedAt: now,
         },
         { merge: true },
@@ -3920,14 +3997,14 @@ export const processDailyRoi = onSchedule(
     const compound = planTypeStr === 'compounding'
     const bal = compound ? Number(ap.compoundingBalance ?? amount) : amount
     const rawDaily = (bal * roiPercent) / 100
-    const daily = Math.min(rawDaily, headroom, totalIncomeRoom)
+    const daily = Math.min(rawDaily, headroom, packageRoom)
     if (daily <= 1e-12) {
       continue
     }
 
     const newPaid = nonWorkingPaid + daily
     const hitCap = newPaid >= cap - 1e-9
-    const roomAfter = totalIncomeRoom - daily
+    const roomAfter = packageRoom - daily
     const completeNow = hitCap || roomAfter <= 1e-9
     const patch: Record<string, unknown> = { nonWorkingPaid: newPaid, updatedAt: now }
     if (compound) patch.compoundingBalance = bal + daily
@@ -3936,7 +4013,7 @@ export const processDailyRoi = onSchedule(
     }
     if (completeNow) {
       patch.status = 'completed'
-      patch.completedReason = hitCap ? 'daily_roi_2x' : 'total_income_3x'
+      patch.completedReason = hitCap ? 'daily_roi_2x' : 'package_income_3x'
     }
     await docSnap.ref.update(patch)
     await db.collection(COL_USERS).doc(userId).update({
