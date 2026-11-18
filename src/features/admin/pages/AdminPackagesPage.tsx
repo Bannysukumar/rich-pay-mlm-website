@@ -34,7 +34,7 @@ const PDF_PLAN_TIERS_SEED: Array<{
   maxRoiMultiplier: number
   sortOrder: number
 }> = [
-  // Until 1 Dec 2026 IST keep current catalog rates; scheduler forces 1% from that day.
+  // Until 1 Dec 2026 IST: current caps (2× daily). Scheduler + activatePackage force 1% + 1× daily / 1× referral from that day.
   { name: 'Tier 1', minAmount: 100, maxAmount: 100, roiPercent: 1, durationDays: 200, maxRoiMultiplier: 2, sortOrder: 10 },
   { name: 'Tier 2', minAmount: 200, maxAmount: 200, roiPercent: 1, durationDays: 200, maxRoiMultiplier: 2, sortOrder: 20 },
   { name: 'Tier 3', minAmount: 300, maxAmount: 300, roiPercent: 1.5, durationDays: 133, maxRoiMultiplier: 2, sortOrder: 30 },

@@ -1955,8 +1955,11 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
   const sponsorPctFrozen = Number(settings.sponsorPercent ?? 5)
   const siteNwMult = Number(settings.nonWorkingIncomeCapMultiplier ?? 2)
   const siteWMult = Number(settings.workingIncomeCapMultiplier ?? 3)
-  const frozenNonWorkingCapMultiplier = resolveNonWorkingCapMultiplierFromPackage(pkg, siteNwMult)
-  const frozenWorkingCapMultiplier = resolveWorkingCapMultiplierFromPackage(pkg, siteWMult)
+  const pkgNwMult = resolveNonWorkingCapMultiplierFromPackage(pkg, siteNwMult)
+  const pkgWMult = resolveWorkingCapMultiplierFromPackage(pkg, siteWMult)
+  /** From 1 Dec 2026 IST: freeze 1× daily + 1× referral (= 2× total). Before that: catalog/site caps. */
+  const { nw: frozenNonWorkingCapMultiplier, w: frozenWorkingCapMultiplier } =
+    effectiveCapMultipliersForNewActivation(pkgNwMult, pkgWMult)
   const totalIncomeMult = frozenNonWorkingCapMultiplier + frozenWorkingCapMultiplier
   const stopAllIncomeFrozen = settings.stopAllIncomeWhenWorkingCapReached === true
   const minWithdrawFrozen = Number(settings.minWithdrawal ?? 10)
@@ -3780,7 +3783,14 @@ export const adminSeedCompensationDefaults = onCall(callableRuntimeOpts, async (
 
 const ROI_CALENDAR_TZ = 'Asia/Kolkata'
 
-/** IST day when catalog + new activations switch to 1% daily ROI (existing packages stay frozen). */
+/**
+ * IST day when new activations switch to:
+ * - 1% daily ROI
+ * - daily ROI max 1× (was 2×)
+ * - referral max 1× (unchanged)
+ * - total max 2× (was 3×)
+ * Existing activePackages keep their frozen planSnapshot.
+ */
 const DEC_2026_ONE_PERCENT_ROI_DAY = '2026-12-01'
 
 /** YYYY-MM-DD in IST for `when`. */
@@ -3793,11 +3803,31 @@ function istDayKey(when = new Date()): string {
   }).format(when)
 }
 
+function isDec2026CapCutover(when = new Date()): boolean {
+  return istDayKey(when) >= DEC_2026_ONE_PERCENT_ROI_DAY
+}
+
 /** New activations on/after Dec 1 2026 IST always freeze at 1% ROI; older catalog % ignored. */
 function effectiveRoiPercentForNewActivation(catalogRoiPercent: number, when = new Date()): number {
-  if (istDayKey(when) >= DEC_2026_ONE_PERCENT_ROI_DAY) return 1
+  if (isDec2026CapCutover(when)) return 1
   const n = Number(catalogRoiPercent)
   return Number.isFinite(n) ? n : 0
+}
+
+/**
+ * Cap multipliers frozen into new activations.
+ * Before Dec 1: package/site defaults (typically 2× daily + 1× referral = 3×).
+ * From Dec 1: 1× daily + 1× referral = 2× total.
+ */
+function effectiveCapMultipliersForNewActivation(
+  pkgNw: number,
+  pkgW: number,
+  when = new Date(),
+): { nw: number; w: number } {
+  if (isDec2026CapCutover(when)) {
+    return { nw: 1, w: 1 }
+  }
+  return { nw: Math.max(0, pkgNw), w: Math.max(0, pkgW) }
 }
 
 function normalizeRoiOffDates(raw: unknown): string[] {
@@ -4141,8 +4171,12 @@ export const processAutoWithdrawals = onSchedule(
 )
 
 /**
- * One-shot (idempotent): on 1 Dec IST, set every catalog `packages.roiPercent` to 1.
- * Does not rewrite existing `activePackages` — those keep frozen planSnapshot ROI.
+ * One-shot (idempotent): on 1 Dec IST, switch catalog + site defaults to:
+ * - roiPercent 1%
+ * - daily ROI max 1× (maxRoiMultiplier / nonWorkingIncomeCapMultiplier)
+ * - referral max 1× (workingIncomeCapMultiplier)
+ * - total max 2×
+ * Does not rewrite existing `activePackages` — those keep frozen planSnapshot.
  */
 export const applyDec2026OnePercentRoiCatalog = onSchedule(
   {
@@ -4174,29 +4208,38 @@ export const applyDec2026OnePercentRoiCatalog = onSchedule(
     let updated = 0
     const batch = db.batch()
     for (const docSnap of snap.docs) {
-      const prev = Number(docSnap.data()?.roiPercent ?? 0)
+      const prev = docSnap.data() ?? {}
       batch.set(
         docSnap.ref,
         {
           roiPercent: 1,
+          maxRoiMultiplier: 1,
+          workingIncomeCapMultiplier: 1,
           updatedAt: Date.now(),
           dec2026OnePercentRoiCatalog: true,
+          dec2026TwoXTotalCapCatalog: true,
         },
         { merge: true },
       )
       updated++
       logger.info('applyDec2026OnePercentRoiCatalog: package', {
         id: docSnap.id,
-        name: docSnap.data()?.name,
-        previousRoiPercent: prev,
+        name: prev.name,
+        previousRoiPercent: Number(prev.roiPercent ?? 0),
+        previousMaxRoiMultiplier: Number(prev.maxRoiMultiplier ?? 0),
         nextRoiPercent: 1,
+        nextMaxRoiMultiplier: 1,
+        nextWorkingCapMultiplier: 1,
       })
     }
     batch.set(
       cfgRef,
       {
+        nonWorkingIncomeCapMultiplier: 1,
+        workingIncomeCapMultiplier: 1,
         dec2026OnePercentRoiAppliedAt: Date.now(),
         dec2026OnePercentRoiAppliedIstDay: istDay,
+        dec2026TwoXTotalCapAppliedAt: Date.now(),
         updatedAt: Date.now(),
       },
       { merge: true },
@@ -4206,7 +4249,17 @@ export const applyDec2026OnePercentRoiCatalog = onSchedule(
     await audit('system-scheduler', 'applyDec2026OnePercentRoiCatalog', {
       istDay,
       packagesUpdated: updated,
+      dailyRoiMax: 1,
+      referralMax: 1,
+      totalMax: 2,
+      roiPercent: 1,
     })
-    logger.info('applyDec2026OnePercentRoiCatalog: done', { istDay, packagesUpdated: updated })
+    logger.info('applyDec2026OnePercentRoiCatalog: done', {
+      istDay,
+      packagesUpdated: updated,
+      dailyRoiMax: 1,
+      referralMax: 1,
+      totalMax: 2,
+    })
   },
 )
