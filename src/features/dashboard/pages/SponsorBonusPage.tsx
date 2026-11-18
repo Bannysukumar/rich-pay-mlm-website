@@ -81,9 +81,9 @@ export function SponsorBonusPage() {
                   Registration alone does not pay this bonus.
                 </p>
                 <p className="text-muted small mb-3">
-                  While your package is active you can earn sponsor / team / rank (extra upto <strong>1×</strong>) plus
-                  daily ROI (upto <strong>2×</strong>). The package becomes inactive automatically at daily 2×, total
-                  3×, or plan end. Only one active package is allowed at a time.
+                  You can hold multiple packages (each earns separately). While a package is active you can earn
+                  sponsor / team / rank (extra upto <strong>1×</strong>) plus daily ROI (upto <strong>2×</strong>). A
+                  package becomes inactive at daily 2×, total 3×, or plan end.
                 </p>
                 <div className="app-datatable-default overflow-auto">
                   <table className="display app-data-table default-data-table ki-data-table w-100" id="example">

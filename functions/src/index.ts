@@ -1854,19 +1854,6 @@ export const activatePackage = onCall(callableRuntimeOpts, async (request) => {
     }
   }
 
-  const existingActive = await db
-    .collection(COL_ACTIVE)
-    .where('userId', '==', beneficiaryUid)
-    .where('status', '==', 'active')
-    .limit(1)
-    .get()
-  if (!existingActive.empty) {
-    throw new HttpsError(
-      'failed-precondition',
-      'Only one active package is allowed. Wait until the current package becomes inactive, then activate again.',
-    )
-  }
-
   const pkgSnap = await db.collection(COL_PACKAGES).doc(packageId).get()
   if (!pkgSnap.exists) throw new HttpsError('not-found', 'Package not found')
   const pkg = pkgSnap.data()!

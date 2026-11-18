@@ -55,43 +55,6 @@ type PkgIncomeRow = {
   startedAtMs: number
 }
 
-/**
- * Non-working earned: sum of `nonWorkingPaid` on v2 snapshot packages only (any status).
- * Working earned: `totalWorkingIncome` when every active stake is v2; if only legacy stakes are active, 0;
- * if mixed active stakes, allocate by working-cap weight (principal × frozen working mult).
- */
-function deriveNewSchemaIncomeHud(
-  rows: PkgIncomeRow[],
-  totalWorkingIncome: number,
-): { nwEarned: number; wValue: number; showWorkingSplitNote: boolean } {
-  let nwEarned = 0
-  let newActiveCap = 0
-  let legacyActiveCap = 0
-  for (const p of rows) {
-    if (p.schemaV2) nwEarned += p.nonWorkingPaid
-    if (!p.liveActive) continue
-    const capPart = Math.max(0, p.amount) * Math.max(0, p.wMult)
-    if (p.schemaV2) newActiveCap += capPart
-    else legacyActiveCap += capPart
-  }
-  const totalActiveCap = newActiveCap + legacyActiveCap
-  const tw = Math.max(0, Number(totalWorkingIncome) || 0)
-  if (totalActiveCap <= 1e-9) {
-    return { nwEarned, wValue: tw, showWorkingSplitNote: false }
-  }
-  if (newActiveCap <= 1e-9) {
-    return { nwEarned, wValue: 0, showWorkingSplitNote: false }
-  }
-  if (legacyActiveCap <= 1e-9) {
-    return { nwEarned, wValue: tw, showWorkingSplitNote: false }
-  }
-  return {
-    nwEarned,
-    wValue: tw * (newActiveCap / totalActiveCap),
-    showWorkingSplitNote: true,
-  }
-}
-
 function normalizePowerRest(pRaw: number, rRaw: number): { p: number; r: number } {
   let p = Math.max(0, pRaw)
   let r = Math.max(0, rRaw)
@@ -317,12 +280,6 @@ export function DashboardHome() {
       settings.rankQualificationRestPercent,
     )
   }, [profile, settings.rankQualificationPowerPercent, settings.rankQualificationRestPercent])
-
-  const newSchemaIncomeHud = useMemo(
-    () =>
-      deriveNewSchemaIncomeHud(pkgIncomeRows, profile?.totalWorkingIncome ?? 0),
-    [pkgIncomeRows, profile?.totalWorkingIncome],
-  )
 
   const incomeCapHud = useMemo(() => {
     const stakes: ActiveStakeForCap[] = pkgIncomeRows.map((p) => ({
@@ -636,46 +593,30 @@ export function DashboardHome() {
             }}
           >
             <div className="card-body">
-              <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+              <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
                 <div>
                   <h4 className="mb-1" style={{ color: '#d4af37', fontWeight: 700 }}>
-                    {incomeCapHud.hasReferralPath ? 'Your income limit (2× daily + 1× referral)' : 'Your daily ROI (2×)'}
+                    Your earnings
                   </h4>
                   <p className="small mb-0" style={{ color: '#aaa' }}>
-                    {incomeCapHud.hasReferralPath ? (
-                      <>
-                        Daily upto <strong className="text-light">$ {fmt(incomeCapHud.roiCap)}</strong> (2×) · Referral
-                        extra upto <strong className="text-light">$ {fmt(incomeCapHud.workingSoftCap)}</strong> (1×) ·
-                        Combined max <strong className="text-light">$ {fmt(incomeCapHud.totalCap)}</strong> (3× of{' '}
-                        <strong className="text-light">$ {fmt(incomeCapHud.activeStake)}</strong>)
-                      </>
-                    ) : (
-                      <>
-                        Max from this plan without referrals:{' '}
-                        <strong className="text-light">$ {fmt(incomeCapHud.roiCap)}</strong> (2× of{' '}
-                        <strong className="text-light">$ {fmt(incomeCapHud.activeStake)}</strong>). Only one active
-                        package at a time.
-                      </>
-                    )}
+                    You can activate <strong className="text-light">multiple packages</strong> — each one earns
+                    separately.
                   </p>
                 </div>
                 <div className="text-end">
-                  <div className="fw-bold" style={{ color: '#d4af37', fontSize: '1.25rem' }}>
-                    {incomeCapHud.hasReferralPath
-                      ? `${incomeCapHud.progressPct}%`
-                      : incomeCapHud.roiCap > 0
-                        ? `${Math.min(100, Math.round((incomeCapHud.roiPaid / incomeCapHud.roiCap) * 1000) / 10)}%`
-                        : '0%'}
+                  <div className="fw-bold text-light" style={{ fontSize: '1.15rem' }}>
+                    $ {fmt(incomeCapHud.totalPaid)}
+                    <span style={{ color: '#888', fontWeight: 500 }}> / $ {fmt(incomeCapHud.totalCap)}</span>
                   </div>
                   <div className="small" style={{ color: '#888' }}>
-                    {incomeCapHud.hasReferralPath ? 'of 3× used' : 'of 2× daily used'}
+                    earned / max
                   </div>
                 </div>
               </div>
 
               <div
                 className="progress mb-3"
-                style={{ height: 10, background: 'rgba(255,255,255,0.08)' }}
+                style={{ height: 8, background: 'rgba(255,255,255,0.08)' }}
                 role="progressbar"
                 aria-valuenow={incomeCapHud.progressPct}
                 aria-valuemin={0}
@@ -684,155 +625,84 @@ export function DashboardHome() {
                 <div
                   className="progress-bar"
                   style={{
-                    width: `${Math.min(
-                      100,
-                      incomeCapHud.hasReferralPath
-                        ? incomeCapHud.progressPct
-                        : incomeCapHud.roiCap > 0
-                          ? (incomeCapHud.roiPaid / incomeCapHud.roiCap) * 100
-                          : 0,
-                    )}%`,
-                    background: incomeCapHud.roiStopped || incomeCapHud.allStopped ? '#c45c5c' : '#d4af37',
+                    width: `${Math.min(100, incomeCapHud.progressPct)}%`,
+                    background: incomeCapHud.allStopped ? '#c45c5c' : '#d4af37',
                   }}
                 />
               </div>
 
+              <div className="row g-3 mb-3">
+                <div className="col-sm-6">
+                  <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                    <div className="small mb-1" style={{ color: '#aaa' }}>
+                      Daily profit left
+                    </div>
+                    <div className="fw-semibold text-light" style={{ fontSize: '1.1rem' }}>
+                      $ {fmt(incomeCapHud.roiRemaining)}
+                    </div>
+                    <div className="small mt-1" style={{ color: '#888' }}>
+                      of $ {fmt(incomeCapHud.roiCap)} daily max (2×)
+                    </div>
+                  </div>
+                </div>
+                <div className="col-sm-6">
+                  <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                    <div className="small mb-1" style={{ color: '#aaa' }}>
+                      {incomeCapHud.hasReferralPath ? 'Referral income left' : 'Referral bonus'}
+                    </div>
+                    <div className="fw-semibold text-light" style={{ fontSize: '1.1rem' }}>
+                      {incomeCapHud.hasReferralPath
+                        ? `$ ${fmt(incomeCapHud.referralExtraRemaining)}`
+                        : 'Not started'}
+                    </div>
+                    <div className="small mt-1" style={{ color: '#888' }}>
+                      {incomeCapHud.hasReferralPath
+                        ? `extra up to $ ${fmt(incomeCapHud.workingSoftCap)} (1×)`
+                        : `Refer friends to earn up to $ ${fmt(incomeCapHud.workingSoftCap)} more`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {perPackageCapRows.length > 0 ? (
-                <div className="row g-3 mb-3">
-                  {perPackageCapRows.map((pkg) => (
-                    <div key={pkg.id} className="col-md-6">
-                      <div
-                        className="p-3 rounded h-100"
-                        style={{
-                          background: 'rgba(255,255,255,0.03)',
-                          border: '1px solid rgba(212,175,55,0.22)',
-                        }}
-                      >
-                        <div className="d-flex justify-content-between align-items-start gap-2 mb-2">
-                          <div>
-                            <div className="fw-semibold text-light">{pkg.title}</div>
-                            <div className="small" style={{ color: '#888' }}>
-                              {pkg.packageName} · started {pkg.startedLabel}
-                            </div>
-                          </div>
-                          <div className="text-end">
-                            <div className="fw-bold" style={{ color: '#d4af37' }}>
-                              $ {fmt(pkg.amount)}
-                            </div>
-                            <div className="small" style={{ color: '#888' }}>
-                              invested
-                            </div>
-                          </div>
-                        </div>
+                <div className="mb-3">
+                  <div className="small mb-2" style={{ color: '#aaa', fontWeight: 600 }}>
+                    Your packages ({perPackageCapRows.length})
+                  </div>
+                  <div className="row g-2">
+                    {perPackageCapRows.map((pkg) => (
+                      <div key={pkg.id} className="col-md-6">
                         <div
-                          className="progress mb-2"
-                          style={{ height: 6, background: 'rgba(255,255,255,0.08)' }}
+                          className="p-3 rounded"
+                          style={{
+                            background: 'rgba(255,255,255,0.03)',
+                            border: '1px solid rgba(212,175,55,0.18)',
+                          }}
                         >
-                          <div
-                            className="progress-bar"
-                            style={{
-                              width: `${Math.min(100, pkg.roiPct)}%`,
-                              background: '#d4af37',
-                            }}
-                          />
-                        </div>
-                        <div className="small mb-1" style={{ color: '#aaa' }}>
-                          Daily profit (upto 2×):{' '}
-                          <strong className="text-light">
-                            $ {fmt(pkg.roiPaid)} / $ {fmt(pkg.roiCap)}
-                          </strong>
-                        </div>
-                        <div className="small mb-1" style={{ color: pkg.roiLeft > 0 ? '#8dcea0' : '#e8a0a0' }}>
-                          Daily left: $ {fmt(pkg.roiLeft)}
-                        </div>
-                        <div className="small mb-0" style={{ color: '#aaa' }}>
-                          {incomeCapHud.hasReferralPath
-                            ? <>Package max with referrals (3×): <strong className="text-light">$ {fmt(pkg.pkgCap)}</strong></>
-                            : <>Plan max without referrals (2×): <strong className="text-light">$ {fmt(pkg.roiCap)}</strong></>}
+                          <div className="d-flex justify-content-between gap-2 mb-1">
+                            <strong className="text-light">{pkg.packageName || pkg.title}</strong>
+                            <span style={{ color: '#d4af37' }}>$ {fmt(pkg.amount)}</span>
+                          </div>
+                          <div className="small mb-1" style={{ color: '#888' }}>
+                            Started {pkg.startedLabel}
+                          </div>
+                          <div className="small" style={{ color: '#ccc' }}>
+                            Daily: $ {fmt(pkg.roiPaid)} earned ·{' '}
+                            <span style={{ color: pkg.roiLeft > 0 ? '#8dcea0' : '#e8a0a0' }}>
+                              $ {fmt(pkg.roiLeft)} left
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               ) : null}
-
-              <div className="row g-3 mb-3">
-                <div className={incomeCapHud.hasReferralPath ? 'col-md-4' : 'col-md-6'}>
-                  <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                    <div className="small" style={{ color: '#aaa' }}>
-                      Daily ROI (upto 2×)
-                    </div>
-                    <div className="fw-semibold text-light">
-                      $ {fmt(incomeCapHud.roiPaid)} / $ {fmt(incomeCapHud.roiCap)}
-                    </div>
-                    <div className="small mt-1" style={{ color: incomeCapHud.roiStopped ? '#e8a0a0' : '#8dcea0' }}>
-                      {incomeCapHud.roiStopped
-                        ? '2× finished — package inactive'
-                        : `Remaining $ ${fmt(incomeCapHud.roiRemaining)}`}
-                    </div>
-                  </div>
-                </div>
-                {incomeCapHud.hasReferralPath ? (
-                  <div className="col-md-4">
-                    <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                      <div className="small" style={{ color: '#aaa' }}>
-                        Referral + other (extra upto 1×)
-                      </div>
-                      <div className="fw-semibold text-light">
-                        $ {fmt(incomeCapHud.workingPaid)} / $ {fmt(incomeCapHud.workingSoftCap)}
-                      </div>
-                      <div
-                        className="small mt-1"
-                        style={{
-                          color: incomeCapHud.referralExtraRemaining > 0 ? '#8dcea0' : '#e8a0a0',
-                        }}
-                      >
-                        Remaining extra 1×: $ {fmt(incomeCapHud.referralExtraRemaining)}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="col-md-6">
-                    <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                      <div className="small" style={{ color: '#aaa' }}>
-                        Unlock +1× more
-                      </div>
-                      <div className="fw-semibold text-light">
-                        Refer members for up to $ {fmt(incomeCapHud.workingSoftCap)}
-                      </div>
-                      <div className="small mt-1" style={{ color: '#8dcea0' }}>
-                        Then combined max becomes $ {fmt(incomeCapHud.totalCap)} (3×)
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {incomeCapHud.hasReferralPath ? (
-                  <div className="col-md-4">
-                    <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                      <div className="small" style={{ color: '#aaa' }}>
-                        Combined total vs 3×
-                      </div>
-                      <div className="fw-semibold text-light">
-                        $ {fmt(incomeCapHud.totalPaid)} / $ {fmt(incomeCapHud.totalCap)}
-                      </div>
-                      <div className="small mt-1" style={{ color: incomeCapHud.allStopped ? '#e8a0a0' : '#8dcea0' }}>
-                        {incomeCapHud.allStopped
-                          ? '3× reached — package inactive'
-                          : `Remaining total $ ${fmt(incomeCapHud.totalRemaining)}`}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
 
               <div
                 className="rounded p-3"
                 style={{
-                  background: incomeCapHud.allStopped
-                    ? 'rgba(196,92,92,0.12)'
-                    : incomeCapHud.workingStopped
-                      ? 'rgba(212,175,55,0.1)'
-                      : 'rgba(255,255,255,0.03)',
+                  background: incomeCapHud.allStopped ? 'rgba(196,92,92,0.12)' : 'rgba(255,255,255,0.03)',
                   border: '1px solid rgba(255,255,255,0.06)',
                 }}
               >
@@ -842,11 +712,6 @@ export function DashboardHome() {
                 <p className="small mb-0" style={{ color: '#bbb' }}>
                   {incomeCapHud.statusDetail}
                 </p>
-                {newSchemaIncomeHud.showWorkingSplitNote ? (
-                  <p className="small mb-0 mt-2" style={{ color: '#888' }}>
-                    Some older packages use an older plan snapshot; totals above still follow your live active stakes.
-                  </p>
-                ) : null}
               </div>
             </div>
           </div>

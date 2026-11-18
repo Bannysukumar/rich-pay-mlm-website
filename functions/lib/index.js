@@ -1610,15 +1610,6 @@ exports.activatePackage = (0, https_1.onCall)(callableRuntimeOpts, async (reques
             }
         }
     }
-    const existingActive = await db
-        .collection(COL_ACTIVE)
-        .where('userId', '==', beneficiaryUid)
-        .where('status', '==', 'active')
-        .limit(1)
-        .get();
-    if (!existingActive.empty) {
-        throw new https_1.HttpsError('failed-precondition', 'Only one active package is allowed. Wait until the current package becomes inactive, then activate again.');
-    }
     const pkgSnap = await db.collection(COL_PACKAGES).doc(packageId).get();
     if (!pkgSnap.exists)
         throw new https_1.HttpsError('not-found', 'Package not found');
