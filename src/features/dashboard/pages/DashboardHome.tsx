@@ -599,8 +599,7 @@ export function DashboardHome() {
                     Your earnings
                   </h4>
                   <p className="small mb-0" style={{ color: '#aaa' }}>
-                    You can activate <strong className="text-light">multiple packages</strong> — each one earns
-                    separately.
+                    Multiple packages allowed — each package earns <strong className="text-light">separately</strong>.
                   </p>
                 </div>
                 <div className="text-end">
@@ -609,7 +608,7 @@ export function DashboardHome() {
                     <span style={{ color: '#888', fontWeight: 500 }}> / $ {fmt(incomeCapHud.totalCap)}</span>
                   </div>
                   <div className="small" style={{ color: '#888' }}>
-                    earned / max
+                    earned / max · {incomeCapHud.maxLabel}
                   </div>
                 </div>
               </div>
@@ -632,46 +631,44 @@ export function DashboardHome() {
               </div>
 
               <div className="row g-3 mb-3">
-                <div className="col-sm-6">
+                <div className={incomeCapHud.hasReferralPath ? 'col-sm-6' : 'col-12'}>
                   <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
                     <div className="small mb-1" style={{ color: '#aaa' }}>
-                      Daily profit left
+                      Daily profit left (2×)
                     </div>
                     <div className="fw-semibold text-light" style={{ fontSize: '1.1rem' }}>
                       $ {fmt(incomeCapHud.roiRemaining)}
                     </div>
                     <div className="small mt-1" style={{ color: '#888' }}>
-                      of $ {fmt(incomeCapHud.roiCap)} daily max (2×)
+                      of $ {fmt(incomeCapHud.roiCap)} daily max across all packages
                     </div>
                   </div>
                 </div>
-                <div className="col-sm-6">
-                  <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
-                    <div className="small mb-1" style={{ color: '#aaa' }}>
-                      {incomeCapHud.hasReferralPath ? 'Referral income left' : 'Referral bonus'}
-                    </div>
-                    <div className="fw-semibold text-light" style={{ fontSize: '1.1rem' }}>
-                      {incomeCapHud.hasReferralPath
-                        ? `$ ${fmt(incomeCapHud.referralExtraRemaining)}`
-                        : 'Not started'}
-                    </div>
-                    <div className="small mt-1" style={{ color: '#888' }}>
-                      {incomeCapHud.hasReferralPath
-                        ? `extra up to $ ${fmt(incomeCapHud.workingSoftCap)} (1×)`
-                        : `Refer friends to earn up to $ ${fmt(incomeCapHud.workingSoftCap)} more`}
+                {incomeCapHud.hasReferralPath ? (
+                  <div className="col-sm-6">
+                    <div className="p-3 rounded" style={{ background: 'rgba(255,255,255,0.03)' }}>
+                      <div className="small mb-1" style={{ color: '#aaa' }}>
+                        Referral income left (1×)
+                      </div>
+                      <div className="fw-semibold text-light" style={{ fontSize: '1.1rem' }}>
+                        $ {fmt(incomeCapHud.referralExtraRemaining)}
+                      </div>
+                      <div className="small mt-1" style={{ color: '#888' }}>
+                        extra up to $ {fmt(incomeCapHud.workingSoftCap)} · total max 3×
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : null}
               </div>
 
               {perPackageCapRows.length > 0 ? (
                 <div className="mb-3">
                   <div className="small mb-2" style={{ color: '#aaa', fontWeight: 600 }}>
-                    Your packages ({perPackageCapRows.length})
+                    Each package separately ({perPackageCapRows.length})
                   </div>
                   <div className="row g-2">
                     {perPackageCapRows.map((pkg) => (
-                      <div key={pkg.id} className="col-md-6">
+                      <div key={pkg.id} className="col-12">
                         <div
                           className="p-3 rounded"
                           style={{
@@ -679,23 +676,60 @@ export function DashboardHome() {
                             border: '1px solid rgba(212,175,55,0.18)',
                           }}
                         >
-                          <div className="d-flex justify-content-between gap-2 mb-1">
-                            <strong className="text-light">{pkg.packageName || pkg.title}</strong>
-                            <span style={{ color: '#d4af37' }}>$ {fmt(pkg.amount)}</span>
+                          <div className="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                            <div>
+                              <strong className="text-light d-block">{pkg.title}</strong>
+                              <span className="small" style={{ color: '#888' }}>
+                                {pkg.packageName && pkg.packageName !== pkg.title
+                                  ? `${pkg.packageName} · `
+                                  : ''}
+                                Started {pkg.startedLabel}
+                              </span>
+                            </div>
+                            <div className="text-end">
+                              <div style={{ color: '#d4af37', fontWeight: 700 }}>$ {fmt(pkg.amount)}</div>
+                              <div className="small" style={{ color: '#888' }}>
+                                this package
+                              </div>
+                            </div>
                           </div>
-                          <div className="small mb-1" style={{ color: '#888' }}>
-                            Started {pkg.startedLabel}
+                          <div
+                            className="progress mb-2"
+                            style={{ height: 6, background: 'rgba(255,255,255,0.08)' }}
+                            role="progressbar"
+                            aria-valuenow={pkg.roiPct}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                          >
+                            <div
+                              className="progress-bar"
+                              style={{
+                                width: `${Math.min(100, pkg.roiPct)}%`,
+                                background: pkg.roiLeft > 0 ? '#d4af37' : '#c45c5c',
+                              }}
+                            />
                           </div>
-                          <div className="small" style={{ color: '#ccc' }}>
-                            Daily: $ {fmt(pkg.roiPaid)} earned ·{' '}
-                            <span style={{ color: pkg.roiLeft > 0 ? '#8dcea0' : '#e8a0a0' }}>
-                              $ {fmt(pkg.roiLeft)} left
+                          <div className="d-flex flex-wrap justify-content-between gap-2 small">
+                            <span style={{ color: '#ccc' }}>
+                              Daily earned $ {fmt(pkg.roiPaid)} / $ {fmt(pkg.roiCap)} (2×)
+                            </span>
+                            <span style={{ color: pkg.roiLeft > 0 ? '#8dcea0' : '#e8a0a0', fontWeight: 600 }}>
+                              $ {fmt(pkg.roiLeft)} left on this package
                             </span>
                           </div>
                         </div>
                       </div>
                     ))}
                   </div>
+                  {!incomeCapHud.hasReferralPath ? (
+                    <p className="small mt-2 mb-0" style={{ color: '#888' }}>
+                      No referral income yet — max shown is 2× daily only. Refer members to unlock +1× (total 3×).
+                    </p>
+                  ) : (
+                    <p className="small mt-2 mb-0" style={{ color: '#888' }}>
+                      Referral +1× is shared across your account (not per package). Daily 2× is tracked separately on each package.
+                    </p>
+                  )}
                 </div>
               ) : null}
 
