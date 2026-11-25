@@ -6,11 +6,12 @@ import { endsAtMillisFromDoc, isLiveActivePackage } from '@/lib/activePackagesDi
 import { COLLECTIONS } from '@/lib/constants'
 import { db } from '@/lib/firebase'
 
+/** Day → Month → Year, e.g. 03 Aug 2026 (avoids MM/DD vs DD/MM confusion). */
 function fmtDate(ms: number) {
   if (!ms) return '—'
-  return new Date(ms).toLocaleDateString('en-US', {
-    month: '2-digit',
+  return new Date(ms).toLocaleDateString('en-GB', {
     day: '2-digit',
+    month: 'short',
     year: 'numeric',
   })
 }
